@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.10.1](https://github.com/rynfar/opencode-claude-max-proxy/compare/v1.10.0...v1.10.1) (2026-03-20)
+
+
+### Bug Fixes
+
+* only send new messages on resume, not full history ([b1e101b](https://github.com/rynfar/opencode-claude-max-proxy/commit/b1e101b0dec5056fe1df18f23adebc4734c2230c))
+* only send new messages on resume, not full history ([5dcbae3](https://github.com/rynfar/opencode-claude-max-proxy/commit/5dcbae3917070a4b5fe3db1fd480b96bfd6c883a)), closes [#49](https://github.com/rynfar/opencode-claude-max-proxy/issues/49)
+
 ## [1.10.0](https://github.com/rynfar/opencode-claude-max-proxy/compare/v1.9.0...v1.10.0) (2026-03-20)
 
 
