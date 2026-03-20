@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.11.2](https://github.com/rynfar/opencode-claude-max-proxy/compare/v1.11.1...v1.11.2) (2026-03-20)
+
+
+### Bug Fixes
+
+* optimize docker-compose with lightweight init and dedup config ([a737190](https://github.com/rynfar/opencode-claude-max-proxy/commit/a737190449d1e0feaa05c6b6d23c1affda05e08f))
+* optimize Dockerfile with multi-stage build and node:22-slim runtime ([679ceef](https://github.com/rynfar/opencode-claude-max-proxy/commit/679ceefd2f7f74a596959d3b64a7d5cf4de06737))
+* replace ubuntu base image with multi-stage node:22 build to fix Docker build failures ([1702a15](https://github.com/rynfar/opencode-claude-max-proxy/commit/1702a15ea5ff58149bc7cceb670cf37a6baae0c4))
+* resolve UID mismatch between claude user and docker-compose init volume ([b8da7b4](https://github.com/rynfar/opencode-claude-max-proxy/commit/b8da7b4c1ad3b0fa2e38c30024aa44fbc87c761c))
+* resolve UID mismatch between claude user and docker-compose init volume ([7e353ad](https://github.com/rynfar/opencode-claude-max-proxy/commit/7e353adf840f94fb27d9a59cd3659e5dbceb207d))
+
 ## [1.11.1](https://github.com/rynfar/opencode-claude-max-proxy/compare/v1.11.0...v1.11.1) (2026-03-20)
 
 
