@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.4.0](https://github.com/rynfar/opencode-claude-max-proxy/compare/v1.3.0...v1.4.0) (2026-03-20)
+
+
+### Features
+
+* fuzzy match agent names for reliable subagent delegation ([fec9516](https://github.com/rynfar/opencode-claude-max-proxy/commit/fec9516b55341461c19129e94d3cc7d316876d71))
+* fuzzy match agent names to fix invalid subagent_type values ([5364124](https://github.com/rynfar/opencode-claude-max-proxy/commit/53641241bee09f7aa11ba0da7c235cd68c54d190))
+* PreToolUse hook for reliable subagent delegation ([01df852](https://github.com/rynfar/opencode-claude-max-proxy/commit/01df852ef0d1ffd0bb888f2d6c0e392933c52b5e))
+* register SDK agent definitions from OpenCode's Task tool ([afa480f](https://github.com/rynfar/opencode-claude-max-proxy/commit/afa480f2c0d39c1c88fec721137615f93e1a9d13))
+* use PreToolUse hook for agent name correction (replaces stream hacks) ([7cb37b6](https://github.com/rynfar/opencode-claude-max-proxy/commit/7cb37b66051b26058baf500da035ac600f51b8b9))
+
 ## [1.3.0](https://github.com/rynfar/opencode-claude-max-proxy/compare/v1.2.0...v1.3.0) (2026-03-20)
 
 
