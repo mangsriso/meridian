@@ -190,11 +190,24 @@ const BLOCKED_BUILTIN_TOOLS = [
 
 // Tools that only exist in Claude Code, not in OpenCode.
 // Block these in passthrough mode so Claude never generates tool_use for them.
+// Full list from Claude Code SDK 0.2.80 — OpenCode has its own equivalents
+// for Read/Write/Edit/Bash/Glob/Grep but not these:
 const CLAUDE_CODE_ONLY_TOOLS = [
-  "AskUserQuestion",
-  "TodoWrite",
-  "TodoRead",
-  "ToolSearch",
+  "AskUserQuestion",   // Claude Code interactive Q&A (no OpenCode equivalent)
+  "Skill",             // Claude Code skill system
+  "ToolSearch",        // Claude Code deferred tool loading
+  "TodoWrite",         // Claude Code todo system
+  "TaskOutput",        // Claude Code background task output
+  "TaskStop",          // Claude Code background task management
+  "CronCreate",        // Claude Code cron jobs
+  "CronDelete",        // Claude Code cron jobs
+  "CronList",          // Claude Code cron jobs
+  "EnterPlanMode",     // Claude Code mode switching (OpenCode has its own)
+  "ExitPlanMode",      // Claude Code mode switching
+  "EnterWorktree",     // Claude Code git worktree management
+  "ExitWorktree",      // Claude Code git worktree management
+  "NotebookEdit",      // Jupyter notebook editing
+  "Agent",             // Claude Code's native agent launcher (we use Task instead)
 ]
 
 const MCP_SERVER_NAME = "opencode"
