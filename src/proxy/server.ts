@@ -464,10 +464,10 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}) {
             }
           : undefined
 
-      // Keep system prompt separate from conversation.
-      // Pass it via appendSystemPrompt so it's a real system message,
-      // not demoted to user content.
-      const prompt = conversationParts
+      // Combine system context with conversation
+      const prompt = systemContext
+        ? `${systemContext}\n\n${conversationParts}`
+        : conversationParts
 
         if (!stream) {
           const contentBlocks: Array<Record<string, unknown>> = []
@@ -488,7 +488,6 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}) {
                 pathToClaudeCodeExecutable: claudeExecutable,
                 permissionMode: "bypassPermissions",
                 allowDangerouslySkipPermissions: true,
-                ...(systemContext ? { appendSystemPrompt: systemContext } : {}),
                 // In passthrough mode: block ALL SDK built-in tools, use OpenCode's via MCP
                 // In normal mode: block built-ins, use our own MCP replacements
                 ...(passthrough
@@ -662,7 +661,6 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}) {
                   pathToClaudeCodeExecutable: claudeExecutable,
                   includePartialMessages: true,
                   permissionMode: "bypassPermissions",
-                  ...(systemContext ? { appendSystemPrompt: systemContext } : {}),
                   allowDangerouslySkipPermissions: true,
                   ...(passthrough
                     ? {
