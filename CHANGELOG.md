@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.6.0](https://github.com/rynfar/opencode-claude-max-proxy/compare/v1.5.0...v1.6.0) (2026-03-20)
+
+
+### Features
+
+* true concurrent SDK sessions (no serialization) ([6dd5aa0](https://github.com/rynfar/opencode-claude-max-proxy/commit/6dd5aa02132bd94257a1b400bd78047bd5fc851b))
+
+
+### Bug Fixes
+
+* concurrent requests with auto-restart supervisor ([1a8f695](https://github.com/rynfar/opencode-claude-max-proxy/commit/1a8f6951437aeea6ea70c75c382c2d4c0bd582e5))
+* revert to Bun.serve, document known concurrent crash ([ecbaec2](https://github.com/rynfar/opencode-claude-max-proxy/commit/ecbaec2b779ea8a0fa6b92f9f684a638ef98b128))
+
 ## [1.5.0](https://github.com/rynfar/opencode-claude-max-proxy/compare/v1.4.0...v1.5.0) (2026-03-20)
 
 
