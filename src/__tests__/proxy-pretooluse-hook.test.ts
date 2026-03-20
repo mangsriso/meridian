@@ -192,6 +192,74 @@ describe("PreToolUse hook: agent name correction", () => {
   })
 })
 
+describe("SDK agents option", () => {
+  beforeEach(() => {
+    mockMessages = [assistantMessage([{ type: "text", text: "Done" }])]
+    capturedQueryParams = null
+    clearSessionCache()
+  })
+
+  it("should pass agents extracted from Task tool to SDK", async () => {
+    const app = createTestApp()
+    await (await post(app, {
+      model: "claude-sonnet-4-5",
+      max_tokens: 1024,
+      stream: false,
+      messages: [{ role: "user", content: "hello" }],
+      tools: [TASK_TOOL],
+    })).json()
+
+    expect(capturedQueryParams.options.agents).toBeDefined()
+    const agentNames = Object.keys(capturedQueryParams.options.agents)
+    expect(agentNames).toContain("oracle")
+    expect(agentNames).toContain("explore")
+    expect(agentNames).toContain("build")
+    expect(agentNames).toContain("plan")
+    expect(agentNames).toContain("librarian")
+    expect(agentNames).toContain("sisyphus-junior")
+  })
+
+  it("each SDK agent should have description and prompt from Task tool", async () => {
+    const app = createTestApp()
+    await (await post(app, {
+      model: "claude-sonnet-4-5",
+      max_tokens: 1024,
+      stream: false,
+      messages: [{ role: "user", content: "hello" }],
+      tools: [TASK_TOOL],
+    })).json()
+
+    const oracle = capturedQueryParams.options.agents["oracle"]
+    expect(oracle.description).toContain("Read-only consultation")
+    expect(oracle.prompt).toContain("oracle")
+    expect(oracle.model).toBe("inherit")
+  })
+
+  it("should not pass agents when no Task tool in request", async () => {
+    const app = createTestApp()
+    await (await post(app, {
+      model: "claude-sonnet-4-5",
+      max_tokens: 1024,
+      stream: false,
+      messages: [{ role: "user", content: "hello" }],
+    })).json()
+
+    expect(capturedQueryParams.options.agents).toBeUndefined()
+  })
+
+  it("should pass plugins: [] to prevent external interference", async () => {
+    const app = createTestApp()
+    await (await post(app, {
+      model: "claude-sonnet-4-5",
+      max_tokens: 1024,
+      stream: false,
+      messages: [{ role: "user", content: "hello" }],
+    })).json()
+
+    expect(capturedQueryParams.options.plugins).toEqual([])
+  })
+})
+
 describe("PreToolUse hook: cleanup of old hacks", () => {
   beforeEach(() => {
     mockMessages = [assistantMessage([{ type: "text", text: "Done" }])]

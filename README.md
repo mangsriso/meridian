@@ -138,16 +138,15 @@ Claude uses these tools **internally** — the tool execution happens inside the
 
 ### Subagent Delegation
 
-When Claude delegates work to a subagent (e.g., `@oracle`, `@explore`, `@librarian`), the proxy uses the Claude Agent SDK's **PreToolUse hook** to correct agent names before the SDK processes them:
+When Claude delegates work to a subagent (e.g., `@oracle`, `@explore`, `@librarian`), the proxy uses the Claude Agent SDK's native **agents** option and **PreToolUse hook** to handle it correctly:
 
-1. **Intercepts** the `Task` tool call via `PreToolUse` hook
-2. **Fuzzy-matches** the agent name to the closest valid agent (e.g., `general-purpose` → `general`, `Explore` → `explore`, `code-reviewer` → `oracle`)
-3. **Rewrites** the `subagent_type` input before the SDK executes the Task
+1. **Extracts** agent definitions from the Task tool description that OpenCode sends in each request
+2. **Registers** them as SDK agent definitions (with descriptions, prompts, and MCP tool access)
+3. **Fuzzy-matches** agent names via `PreToolUse` hook as a safety net (e.g., `general-purpose` → `general`, `Explore` → `explore`)
 4. **Filters** internal MCP tool calls from the stream (OpenCode only sees tools it can handle)
+5. **Blocks** external Claude Code plugins (`plugins: []`) and strips experimental env vars to prevent interference
 
-The valid agent names are extracted from the Task tool definition that OpenCode sends in each request, so this works automatically with any agent framework (oh-my-opencode, custom agents, or OpenCode's built-in agents).
-
-> **Note:** The SDK occasionally runs internal retries with incorrect agent names that show as cosmetic errors (✗) in the UI. These don't affect the result — the corrected agent call succeeds and returns the right answer.
+This works automatically with any agent framework — native OpenCode (build + plan), oh-my-opencode (oracle, explore, librarian, etc.), or custom agents defined in `opencode.json`.
 
 ### Session Resume
 
@@ -235,29 +234,24 @@ launchctl load ~/Library/LaunchAgents/com.claude-max-proxy.plist
 bun test
 ```
 
-65 tests covering:
+88 tests covering:
 - Tool use forwarding (streaming and non-streaming)
 - MCP tool filtering (internal tools hidden from client)
 - Subagent concurrent request handling
 - Agent name fuzzy matching
 - PreToolUse hook integration
+- SDK agent definition extraction (native + oh-my-opencode)
 - Session resume (header-based and fingerprint-based)
 - Full Anthropic API tool loop simulation
 - Error recovery
 
 ## Known Limitations
 
-### Cosmetic: SDK Internal Subagent Retries
+### Model Routing for Subagents
 
-When Claude delegates to a subagent, the SDK sometimes runs internal retries with incorrect agent names. You may see cosmetic ✗ errors alongside a ✓ success:
+All subagents run on Claude (via your Max subscription) regardless of what model is configured in oh-my-opencode. This is because the SDK's internal agent system only supports Claude models (`sonnet`, `opus`, `haiku`). Models from other providers (OpenAI, Google) configured in oh-my-opencode are mapped to `inherit` (uses the parent session's model).
 
-```
-• Review project  Oracle Agent
-✓ Review project  Oracle Agent       ← PreToolUse hook corrected the name → succeeded
-✗ task failed: Unknown agent type    ← SDK internal retry with wrong name (cosmetic)
-```
-
-**This is cosmetic only.** The PreToolUse hook ensures at least one call uses the correct agent name and succeeds. The SDK's internal retries use a different code path that the hook cannot fully intercept. The final answer is always correct and includes the subagent's output.
+This means your oracle agent won't use GPT-5.2, and your explore agent won't use Gemini — they'll all use Claude. The agent descriptions and prompts are preserved, just the model routing is different.
 
 ### Title Generation
 
@@ -341,9 +335,10 @@ src/
 ├── logger.ts        # Structured logging with AsyncLocalStorage context
 ├── plugin/
 │   └── claude-max-headers.ts  # OpenCode plugin for session header injection
-└── __tests__/       # 65 tests across 10 files
+└── __tests__/       # 88 tests across 12 files
     ├── helpers.ts
     ├── integration.test.ts
+    ├── proxy-agent-definitions.test.ts
     ├── proxy-agent-fuzzy-match.test.ts
     ├── proxy-mcp-filtering.test.ts
     ├── proxy-pretooluse-hook.test.ts

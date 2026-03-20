@@ -13,6 +13,7 @@ import { opencodeMcpServer } from "../mcpTools"
 import { randomUUID, createHash } from "crypto"
 import { withClaudeLogContext } from "../logger"
 import { fuzzyMatchAgentName } from "./agentMatch"
+import { buildAgentDefinitions } from "./agentDefs"
 
 // --- Session Tracking ---
 // Maps OpenCode session ID (or fingerprint) → Claude SDK session ID
@@ -169,6 +170,9 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}) {
         const stream = body.stream ?? true
         const workingDirectory = process.env.CLAUDE_PROXY_WORKDIR || process.cwd()
 
+        // Strip env vars that cause SDK subprocess to load unwanted plugins/features
+        const { CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS, ...cleanEnv } = process.env
+
         // Session resume: look up cached Claude SDK session
         const opencodeSessionId = c.req.header("x-opencode-session")
         const cachedSession = lookupSession(opencodeSessionId, body.messages || [])
@@ -206,17 +210,23 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}) {
       }
 
       // Extract available agent types from the Task tool definition.
-      // Used for: 1) prompt hint injection, 2) fuzzy matching in tool_use normalization
+      // Used for: 1) SDK agent definitions, 2) fuzzy matching in PreToolUse hook, 3) prompt hints
       let validAgentNames: string[] = []
+      let sdkAgents: Record<string, any> = {}
       if (Array.isArray(body.tools)) {
         const taskTool = body.tools.find((t: any) => t.name === "task" || t.name === "Task")
         if (taskTool?.description) {
-          const agentMatch = taskTool.description.match(/Available agent types.*?:\n((?:- \w[\w-]*:.*\n?)+)/s)
-          if (agentMatch) {
-            validAgentNames = [...agentMatch[1].matchAll(/^- (\w[\w-]*):/gm)].map(m => m[1])
-            if (validAgentNames.length > 0) {
-              systemContext += `\n\nIMPORTANT: When using the task/Task tool, the subagent_type parameter must be one of these exact values (case-sensitive, lowercase): ${validAgentNames.join(", ")}. Do NOT capitalize or modify these names.`
-            }
+          // Build SDK agent definitions from the Task tool description.
+          // This makes the SDK's native Task handler recognize agent names
+          // from OpenCode (with or without oh-my-opencode).
+          sdkAgents = buildAgentDefinitions(taskTool.description, [...ALLOWED_MCP_TOOLS])
+          validAgentNames = Object.keys(sdkAgents)
+
+          if (process.env.CLAUDE_PROXY_DEBUG) {
+            claudeLog("debug.agents", { names: validAgentNames, count: validAgentNames.length })
+          }
+          if (validAgentNames.length > 0) {
+            systemContext += `\n\nIMPORTANT: When using the task/Task tool, the subagent_type parameter must be one of these exact values (case-sensitive, lowercase): ${validAgentNames.join(", ")}. Do NOT capitalize or modify these names.`
           }
         }
       }
@@ -298,6 +308,9 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}) {
                 mcpServers: {
                   [MCP_SERVER_NAME]: opencodeMcpServer
                 },
+                plugins: [], // Prevent external plugins (e.g., oh-my-claudecode) from interfering
+                env: cleanEnv,
+                ...(Object.keys(sdkAgents).length > 0 ? { agents: sdkAgents } : {}),
                 ...(resumeSessionId ? { resume: resumeSessionId } : {}),
                 ...(taskHook ? { hooks: taskHook } : {}),
               }
@@ -439,6 +452,9 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}) {
                   mcpServers: {
                     [MCP_SERVER_NAME]: opencodeMcpServer
                   },
+                  plugins: [], // Prevent external plugins from interfering
+                  env: cleanEnv,
+                  ...(Object.keys(sdkAgents).length > 0 ? { agents: sdkAgents } : {}),
                   ...(resumeSessionId ? { resume: resumeSessionId } : {}),
                   ...(taskHook ? { hooks: taskHook } : {}),
                 }
