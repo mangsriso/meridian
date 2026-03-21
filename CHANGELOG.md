@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.12.1](https://github.com/rynfar/opencode-claude-max-proxy/compare/v1.12.0...v1.12.1) (2026-03-21)
+
+
+### Bug Fixes
+
+* deduplicate tool_use blocks in streaming passthrough mode ([f8238b9](https://github.com/rynfar/opencode-claude-max-proxy/commit/f8238b9e45f47da9c6ca0eaa3b812199dde800f6))
+* deduplicate tool_use blocks in streaming passthrough mode ([0007887](https://github.com/rynfar/opencode-claude-max-proxy/commit/000788786ed8a9d98a9ced2ad75ac36a8f6cc4d3)), closes [#69](https://github.com/rynfar/opencode-claude-max-proxy/issues/69)
+* make tsconfig.json optional in Docker COPY to prevent build failure ([9526f54](https://github.com/rynfar/opencode-claude-max-proxy/commit/9526f54323ec6d8f2f603f9d9fd9d1e5dd227cee))
+* make tsconfig.json optional in Docker COPY to prevent build failure ([fe61ebf](https://github.com/rynfar/opencode-claude-max-proxy/commit/fe61ebf3ec65eae8940a71b1d5bc2ca15fb3e860)), closes [#70](https://github.com/rynfar/opencode-claude-max-proxy/issues/70)
+
 ## [1.12.0](https://github.com/rynfar/opencode-claude-max-proxy/compare/v1.11.2...v1.12.0) (2026-03-21)
 
 
