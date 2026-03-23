@@ -13,7 +13,7 @@ import { existsSync } from "fs"
 import { fileURLToPath } from "url"
 import { join, dirname } from "path"
 import { promisify } from "util"
-import { opencodeMcpServer } from "../mcpTools"
+import { createOpencodeMcpServer } from "../mcpTools"
 import { randomUUID, createHash } from "crypto"
 import { withClaudeLogContext } from "../logger"
 import { fuzzyMatchAgentName } from "./agentMatch"
@@ -514,8 +514,16 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
         const stream = body.stream ?? true
         const workingDirectory = process.env.CLAUDE_PROXY_WORKDIR || process.cwd()
 
-        // Strip env vars that cause SDK subprocess to load unwanted plugins/features
-        const { CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS, ...cleanEnv } = process.env
+        // Strip env vars that would cause the SDK subprocess to loop back through
+        // the proxy instead of using its native Claude Max auth. Also strip vars
+        // that cause unwanted SDK plugin/feature loading.
+        const {
+          CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS,
+          ANTHROPIC_API_KEY: _dropApiKey,
+          ANTHROPIC_BASE_URL: _dropBaseUrl,
+          ANTHROPIC_AUTH_TOKEN: _dropAuthToken,
+          ...cleanEnv
+        } = process.env
 
         let systemContext = ""
         if (body.system) {
@@ -795,7 +803,7 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
                   : {
                       disallowedTools: [...BLOCKED_BUILTIN_TOOLS],
                       allowedTools: [...ALLOWED_MCP_TOOLS],
-                      mcpServers: { [MCP_SERVER_NAME]: opencodeMcpServer },
+                      mcpServers: { [MCP_SERVER_NAME]: createOpencodeMcpServer() },
                     }),
                 plugins: [],
                 env: { ...cleanEnv, ENABLE_TOOL_SEARCH: "false" },
@@ -991,7 +999,7 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
                     : {
                         disallowedTools: [...BLOCKED_BUILTIN_TOOLS],
                         allowedTools: [...ALLOWED_MCP_TOOLS],
-                        mcpServers: { [MCP_SERVER_NAME]: opencodeMcpServer },
+                        mcpServers: { [MCP_SERVER_NAME]: createOpencodeMcpServer() },
                       }),
                   plugins: [],
                   env: { ...cleanEnv, ENABLE_TOOL_SEARCH: "false" },

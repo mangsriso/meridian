@@ -37,7 +37,7 @@ mock.module("../logger", () => ({
 }))
 
 mock.module("../mcpTools", () => ({
-  opencodeMcpServer: { type: "sdk", name: "opencode", instance: {} },
+  createOpencodeMcpServer: () => ({ type: "sdk", name: "opencode", instance: {} }),
 }))
 
 const lineageTmpDir = mkdtempSync(join(tmpdir(), "session-lineage-test-"))

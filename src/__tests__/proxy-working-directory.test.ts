@@ -30,7 +30,7 @@ mock.module("../logger", () => ({
 }))
 
 mock.module("../mcpTools", () => ({
-  opencodeMcpServer: { type: "sdk", name: "opencode", instance: {} },
+  createOpencodeMcpServer: () => ({ type: "sdk", name: "opencode", instance: {} }),
 }))
 
 const { createProxyServer, clearSessionCache } = await import("../proxy/server")

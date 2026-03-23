@@ -42,7 +42,7 @@ mock.module("../logger", () => ({
 }))
 
 mock.module("../mcpTools", () => ({
-  opencodeMcpServer: { type: "sdk", name: "opencode", instance: {} },
+  createOpencodeMcpServer: () => ({ type: "sdk", name: "opencode", instance: {} }),
 }))
 
 const fpTmpDir = mkdtempSync(join(tmpdir(), "session-fp-context-test-"))

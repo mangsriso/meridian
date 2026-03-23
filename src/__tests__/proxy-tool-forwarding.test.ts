@@ -54,7 +54,7 @@ mock.module("../logger", () => ({
 
 // Mock mcpTools
 mock.module("../mcpTools", () => ({
-  opencodeMcpServer: { type: "sdk", name: "opencode", instance: {} },
+  createOpencodeMcpServer: () => ({ type: "sdk", name: "opencode", instance: {} }),
 }))
 
 // Import AFTER mocking
