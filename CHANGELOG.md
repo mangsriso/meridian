@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.15.0](https://github.com/rynfar/opencode-claude-max-proxy/compare/v1.14.0...v1.15.0) (2026-03-23)
+
+
+### Features
+
+* add proxyOverheadMs metric to telemetry ([5c573b1](https://github.com/rynfar/opencode-claude-max-proxy/commit/5c573b1b3c95a9a30e4cc77408ec08e47e4a2c24))
+* add proxyOverheadMs metric to telemetry ([049063e](https://github.com/rynfar/opencode-claude-max-proxy/commit/049063ee9df27ca3a100e9eb9e3eeba367560eaa)), closes [#104](https://github.com/rynfar/opencode-claude-max-proxy/issues/104)
+
+
+### Bug Fixes
+
+* mock Date.now in pruning test to prevent CI failure ([5ca8653](https://github.com/rynfar/opencode-claude-max-proxy/commit/5ca8653a854960ef2998c3850d804e6a192ab10f))
+* mock Date.now in pruning test to prevent flaky CI failure ([ea56c74](https://github.com/rynfar/opencode-claude-max-proxy/commit/ea56c74ebeaa6275daa43a5aba6892c5f78558f7))
+* prevent env var loop and MCP server transport reuse with SDK &gt;=0.2.81 ([b20dfee](https://github.com/rynfar/opencode-claude-max-proxy/commit/b20dfee5658738716fa329279a1f4f712aff8d90))
+* prevent env var loop and MCP server transport reuse with SDK &gt;=0.2.81 ([b3f3ad6](https://github.com/rynfar/opencode-claude-max-proxy/commit/b3f3ad6b3bb7ccd7fa76746987c2ef944c780690))
+
 ## [1.14.0](https://github.com/rynfar/opencode-claude-max-proxy/compare/v1.13.6...v1.14.0) (2026-03-23)
 
 
