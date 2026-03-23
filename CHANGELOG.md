@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.13.5](https://github.com/rynfar/opencode-claude-max-proxy/compare/v1.13.4...v1.13.5) (2026-03-23)
+
+
+### Bug Fixes
+
+* remove duplicate cleanup timer and stop re-throwing in error event handler ([ae7404a](https://github.com/rynfar/opencode-claude-max-proxy/commit/ae7404af675599de2ce4159bf82ed148b6104bb8))
+
 ## [1.13.4](https://github.com/rynfar/opencode-claude-max-proxy/compare/v1.13.3...v1.13.4) (2026-03-23)
 
 
