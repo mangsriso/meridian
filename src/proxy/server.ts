@@ -790,8 +790,6 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
                 ...(systemContext ? {
                   systemPrompt: { type: "preset" as const, preset: "claude_code" as const, append: systemContext }
                 } : {}),
-                // In passthrough mode: block ALL SDK built-in tools, use OpenCode's via MCP
-                // In normal mode: block built-ins, use our own MCP replacements
                 ...(passthrough
                   ? {
                       disallowedTools: [...BLOCKED_BUILTIN_TOOLS, ...CLAUDE_CODE_ONLY_TOOLS],
@@ -801,7 +799,7 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
                       } : {}),
                     }
                   : {
-                      disallowedTools: [...BLOCKED_BUILTIN_TOOLS],
+                      disallowedTools: [...BLOCKED_BUILTIN_TOOLS, ...CLAUDE_CODE_ONLY_TOOLS],
                       allowedTools: [...ALLOWED_MCP_TOOLS],
                       mcpServers: { [MCP_SERVER_NAME]: createOpencodeMcpServer() },
                     }),
@@ -999,7 +997,7 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
                         } : {}),
                       }
                     : {
-                        disallowedTools: [...BLOCKED_BUILTIN_TOOLS],
+                        disallowedTools: [...BLOCKED_BUILTIN_TOOLS, ...CLAUDE_CODE_ONLY_TOOLS],
                         allowedTools: [...ALLOWED_MCP_TOOLS],
                         mcpServers: { [MCP_SERVER_NAME]: createOpencodeMcpServer() },
                       }),
