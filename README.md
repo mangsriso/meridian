@@ -42,8 +42,6 @@ You're paying for Claude Max. It includes programmatic access through the Claude
 
 Meridian bridges that gap. It runs locally, accepts standard Anthropic API requests, and routes them through the SDK using your Max subscription. Claude does the work — Meridian just lets you pick the tool.
 
-## How It Works
-
 <p align="center">
   <img src="assets/how-it-works.svg" alt="How Meridian works" width="920"/>
 </p>
