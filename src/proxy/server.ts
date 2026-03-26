@@ -862,6 +862,12 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
               const skipBlockIndices = new Set<number>()
               const streamedToolUseIds = new Set<string>()
 
+              // Block index remapping: the SDK resets indices on each turn, but
+              // we skip intermediate message_start/stop so the client sees one
+              // message. Without remapping, turn 2's index=0 collides with turn 1's.
+              let nextClientBlockIndex = 0
+              const sdkToClientIndex = new Map<number, number>()
+
               try {
                 for await (const message of response) {
                   if (streamClosed) {
@@ -895,6 +901,7 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
                     // that the SDK executes. Don't forward them to OpenCode.
                     if (eventType === "message_start") {
                       skipBlockIndices.clear()
+                      sdkToClientIndex.clear()
                       // Only emit the first message_start — subsequent ones are internal SDK turns
                       if (messageStartEmitted) {
                         continue
@@ -924,11 +931,20 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
                           continue
                         }
                       }
+                      // Assign a monotonic client index for this forwarded block
+                      if (eventIndex !== undefined) {
+                        sdkToClientIndex.set(eventIndex, nextClientBlockIndex++)
+                      }
                     }
 
                     // Skip deltas and stops for MCP tool blocks
                     if (eventIndex !== undefined && skipBlockIndices.has(eventIndex)) {
                       continue
+                    }
+
+                    // Remap block index to monotonic client index
+                    if (eventIndex !== undefined && sdkToClientIndex.has(eventIndex)) {
+                      (event as any).index = sdkToClientIndex.get(eventIndex)
                     }
 
                     // Skip intermediate message_delta with stop_reason: tool_use

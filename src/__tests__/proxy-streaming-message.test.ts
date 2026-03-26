@@ -180,6 +180,81 @@ describe("Streaming: single message per response", () => {
     expect((textDeltas[0]?.data as any).delta.text).toBe("Hello!")
   })
 
+  it("should remap block indices to be monotonic across turns", async () => {
+    // Turn 1: thinking (index=0), text (index=1), MCP tool (index=2, filtered)
+    // Turn 2: text (index=0 in SDK, should become index=2 for client)
+    mockMessages = [
+      messageStart("msg_turn1"),
+      streamEvent({ type: "content_block_start", index: 0, content_block: { type: "thinking", thinking: "", signature: "" } }),
+      streamEvent({ type: "content_block_delta", index: 0, delta: { type: "thinking_delta", thinking: "Let me check." } }),
+      streamEvent({ type: "content_block_stop", index: 0 }),
+      textBlockStart(1),
+      textDelta(1, "Reading the file..."),
+      blockStop(1),
+      toolUseBlockStart(2, "mcp__opencode__read", "toolu_mcp1"),
+      inputJsonDelta(2, '{"path":"package.json"}'),
+      blockStop(2),
+      messageDelta("tool_use"),
+      messageStop(),
+      // Turn 2: SDK resets to index=0
+      messageStart("msg_turn2"),
+      textBlockStart(0),
+      textDelta(0, "The name field is opencode-claude-max-proxy."),
+      blockStop(0),
+      messageDelta("end_turn"),
+      messageStop(),
+    ]
+
+    const app = createTestApp()
+    const events = await postStream(app, "what is the name in package.json")
+
+    // Collect all content_block_start events and their indices
+    const blockStarts = events
+      .filter((e) => e.event === "content_block_start")
+      .map((e) => ({ index: (e.data as any).index, type: (e.data as any).content_block?.type }))
+
+    // Should have 3 blocks: thinking, text, text
+    expect(blockStarts.length).toBe(3)
+
+    // Indices must be monotonically increasing — no collisions
+    const indices = blockStarts.map((b) => b.index)
+    for (let i = 1; i < indices.length; i++) {
+      expect(indices[i]).toBeGreaterThan(indices[i - 1]!)
+    }
+
+    // Verify specific remapping: turn 2's index=0 should become index=2
+    expect(blockStarts[0]).toEqual({ index: 0, type: "thinking" })
+    expect(blockStarts[1]).toEqual({ index: 1, type: "text" })
+    expect(blockStarts[2]).toEqual({ index: 2, type: "text" })
+
+    // Deltas and stops should also use remapped indices
+    const turn2Deltas = events.filter(
+      (e) => e.event === "content_block_delta" &&
+        (e.data as any).delta?.type === "text_delta" &&
+        (e.data as any).delta?.text?.includes("opencode-claude-max-proxy")
+    )
+    expect(turn2Deltas.length).toBe(1)
+    expect((turn2Deltas[0]?.data as any).index).toBe(2)
+  })
+
+  it("should not remap indices for single-turn responses", async () => {
+    mockMessages = [
+      messageStart("msg_single"),
+      textBlockStart(0),
+      textDelta(0, "Hello!"),
+      blockStop(0),
+      messageDelta("end_turn"),
+      messageStop(),
+    ]
+
+    const app = createTestApp()
+    const events = await postStream(app, "hello")
+
+    const blockStarts = events.filter((e) => e.event === "content_block_start")
+    expect(blockStarts.length).toBe(1)
+    expect((blockStarts[0]?.data as any).index).toBe(0)
+  })
+
   it("should forward non-MCP tool_use even in multi-turn", async () => {
     // Turn 1: MCP tool (hidden) + Task tool (forwarded)
     mockMessages = [
