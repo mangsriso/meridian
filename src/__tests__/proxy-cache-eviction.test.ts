@@ -70,6 +70,21 @@ async function send(app: TestApp, session: string | undefined, firstMessage: str
   await response.json()
 }
 
+async function sendContinuation(app: TestApp, session: string, firstMessage: string, followUp: string, sessionId: string) {
+  queuedSessionIds.push(sessionId)
+  const response = await post(app, {
+    model: "claude-sonnet-4-5",
+    max_tokens: 128,
+    stream: false,
+    messages: [
+      { role: "user", content: firstMessage },
+      { role: "assistant", content: [{ type: "text", text: "ok" }] },
+      { role: "user", content: followUp },
+    ],
+  }, { "x-opencode-session": session })
+  await response.json()
+}
+
 beforeEach(() => {
   mockMessages = [assistantMessage([{ type: "text", text: "ok" }])]
   capturedQueryParams = null
@@ -97,15 +112,19 @@ describe("Session cache LRU eviction", () => {
   it("refreshes recency when a key is accessed", async () => {
     const app = createTestApp()
 
+    // Store two sessions (cache limit = 2)
     await send(app, "oc-A", "first-A", "sdk-A")
     await send(app, "oc-B", "first-B", "sdk-B")
 
-    await send(app, "oc-A", "first-A", "sdk-A")
+    // Access A with a continuation (growing messages) to refresh its recency
+    await sendContinuation(app, "oc-A", "first-A", "follow-up-A", "sdk-A")
     expect(capturedQueryParams?.options?.resume).toBe("sdk-A")
 
+    // Store C — should evict B (not A, since A was accessed more recently)
     await send(app, "oc-C", "first-C", "sdk-C")
 
-    await send(app, "oc-B", "first-B", "sdk-B-new")
+    // B should be evicted — continuation attempt should not resume
+    await sendContinuation(app, "oc-B", "first-B", "follow-up-B", "sdk-B-new")
     expect(capturedQueryParams?.options?.resume).toBeUndefined()
   })
 

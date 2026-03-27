@@ -244,6 +244,46 @@ describe("verifyLineage", () => {
     expect(result.type).toBe("undo")
   })
 
+  it("returns diverged when identical messages are replayed (same count, same content)", () => {
+    // Bug fix: identical message arrays should start a fresh session,
+    // not resume the old one — otherwise ghost context accumulates.
+    const msgs = [msg("user", "say hello world")]
+    const session = makeSession({
+      lineageHash: computeLineageHash(msgs),
+      messageCount: msgs.length,
+      messageHashes: computeMessageHashes(msgs),
+    })
+    const result = verifyLineage(session, msgs, "key", mockCache)
+    expect(result.type).toBe("diverged")
+  })
+
+  it("returns diverged when identical multi-message conversation is replayed", () => {
+    const msgs = [
+      msg("user", "hello"), msg("assistant", "hi"),
+      msg("user", "how are you?"), msg("assistant", "good"),
+    ]
+    const session = makeSession({
+      lineageHash: computeLineageHash(msgs),
+      messageCount: msgs.length,
+      messageHashes: computeMessageHashes(msgs),
+    })
+    const result = verifyLineage(session, msgs, "key", mockCache)
+    expect(result.type).toBe("diverged")
+  })
+
+  it("still returns continuation when messages grow beyond cached count", () => {
+    // Ensure the fix doesn't break normal continuation flow
+    const msgs = [msg("user", "hello")]
+    const session = makeSession({
+      lineageHash: computeLineageHash(msgs),
+      messageCount: msgs.length,
+      messageHashes: computeMessageHashes(msgs),
+    })
+    const extended = [...msgs, msg("assistant", "hi"), msg("user", "how are you?")]
+    const result = verifyLineage(session, extended, "key", mockCache)
+    expect(result.type).toBe("continuation")
+  })
+
   it("returns compaction when suffix matches on long conversation", () => {
     // Need >= 6 stored messages and >= MIN_SUFFIX_FOR_COMPACTION suffix overlap
     const msgs = [

@@ -141,6 +141,13 @@ export function verifyLineage(
   const prefix = messages.slice(0, cached.messageCount)
   const prefixHash = computeLineageHash(prefix)
   if (prefixHash === cached.lineageHash) {
+    // Same or fewer messages with matching hash = replay/retry, not continuation.
+    // Without this guard, identical requests resume the old SDK session and
+    // re-send the last user message, causing ghost context accumulation.
+    if (messages.length <= cached.messageCount) {
+      cache.delete(cacheKey)
+      return { type: "diverged" }
+    }
     return { type: "continuation", session: cached }
   }
 
