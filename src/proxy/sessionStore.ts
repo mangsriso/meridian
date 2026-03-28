@@ -90,11 +90,14 @@ function releaseLock(lockPath: string): void {
 
 /** Override for testing — avoids env var race when test files run in parallel */
 let sessionDirOverride: string | null = null
+/** When true, skip file locking entirely (for testing) */
+let skipLocking = false
 
 /** Set an explicit session store directory. Takes priority over env var.
  *  Pass null to clear. For testing only. */
 export function setSessionStoreDir(dir: string | null): void {
   sessionDirOverride = dir
+  skipLocking = dir !== null
 }
 
 function getStorePath(): string {
@@ -144,8 +147,8 @@ export function lookupSharedSession(key: string): StoredSession | undefined {
 export function storeSharedSession(key: string, claudeSessionId: string, messageCount?: number, lineageHash?: string, messageHashes?: string[], sdkMessageUuids?: Array<string | null>): void {
   const path = getStorePath()
   const lockPath = `${path}.lock`
-  const hasLock = acquireLock(lockPath)
-  if (!hasLock) {
+  const hasLock = skipLocking ? false : acquireLock(lockPath)
+  if (!hasLock && !skipLocking) {
     console.warn("[sessionStore] could not acquire lock, proceeding without")
   }
   try {
@@ -185,8 +188,8 @@ export function storeSharedSession(key: string, claudeSessionId: string, message
 export function evictSharedSession(key: string): void {
   const path = getStorePath()
   const lockPath = `${path}.lock`
-  const hasLock = acquireLock(lockPath)
-  if (!hasLock) {
+  const hasLock = skipLocking ? false : acquireLock(lockPath)
+  if (!hasLock && !skipLocking) {
     console.warn("[sessionStore] could not acquire lock for eviction, proceeding without")
   }
   try {
