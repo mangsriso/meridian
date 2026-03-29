@@ -57,4 +57,34 @@ export interface AgentAdapter {
    * MCP tools that are allowed through the proxy's tool filter.
    */
   getAllowedMcpTools(): readonly string[]
+
+  /**
+   * Build SDK agent definitions from the request body.
+   * Returns agent name → AgentDefinition map for SDK subagent routing.
+   * Return empty object {} if the agent doesn't support subagent routing.
+   */
+  buildSdkAgents?(body: any, mcpToolNames: readonly string[]): Record<string, any>
+
+  /**
+   * Build SDK hooks (e.g., PreToolUse) for this agent.
+   * Return undefined if no hooks are needed.
+   */
+  buildSdkHooks?(body: any, sdkAgents: Record<string, any>): any
+
+  /**
+   * Build additional system context to append (e.g., agent name hints).
+   * Return empty string if nothing to add.
+   */
+  buildSystemContextAddendum?(body: any, sdkAgents: Record<string, any>): string
+
+  /**
+   * Whether this agent uses passthrough mode for tool execution.
+   *
+   * In passthrough mode the proxy returns tool_use blocks to the calling
+   * agent for it to execute, rather than executing them internally via MCP.
+   *
+   * When undefined, falls back to the CLAUDE_PROXY_PASSTHROUGH env var.
+   * When defined, takes precedence over the env var for this agent.
+   */
+  usesPassthrough?(): boolean
 }
