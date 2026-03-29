@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/rynfar/meridian/releases"><img src="https://img.shields.io/github/v/release/rynfar/@rynfar/meridian?style=flat-square&color=6366f1&label=release" alt="Release"></a>
+  <a href="https://github.com/rynfar/meridian/releases"><img src="https://img.shields.io/github/v/release/rynfar/meridian?style=flat-square&color=6366f1&label=release" alt="Release"></a>
   <a href="https://www.npmjs.com/package/@rynfar/meridian"><img src="https://img.shields.io/npm/v/@rynfar/meridian?style=flat-square&color=8b5cf6&label=npm" alt="npm"></a>
   <a href="#"><img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-a78bfa?style=flat-square" alt="Platform"></a>
   <a href="#"><img src="https://img.shields.io/badge/license-MIT-c4b5fd?style=flat-square" alt="License"></a>
@@ -69,7 +69,7 @@ Meridian bridges that gap. It runs locally, accepts standard Anthropic API reque
 ANTHROPIC_API_KEY=x ANTHROPIC_BASE_URL=http://127.0.0.1:3456 opencode
 ```
 
-For automatic session tracking, use a plugin like [opencode-meridian](https://github.com/ianjwhite99/opencode-meridian), or see the [reference plugin](examples/opencode-plugin/claude-max-headers.ts) to build your own.
+For automatic session tracking, use a plugin like [opencode-with-claude](https://github.com/ianjwhite99/opencode-with-claude), or see the [reference plugin](examples/opencode-plugin/claude-max-headers.ts) to build your own.
 
 ### Crush
 
@@ -194,7 +194,7 @@ export ANTHROPIC_BASE_URL=http://127.0.0.1:3456
 
 | Agent | Status | Plugin | Notes |
 |-------|--------|--------|-------|
-| [OpenCode](https://github.com/anomalyco/opencode) | ✅ Verified | [opencode-meridian](https://github.com/ianjwhite99/opencode-meridian) | Full tool support, session resume, streaming, subagents |
+| [OpenCode](https://github.com/anomalyco/opencode) | ✅ Verified | [opencode-with-claude](https://github.com/ianjwhite99/opencode-with-claude) | Full tool support, session resume, streaming, subagents |
 | [Droid (Factory AI)](https://factory.ai/product/ide) | ✅ Verified | BYOK config (see setup above) | Full tool support, session resume, streaming; one-time BYOK setup |
 | [Crush](https://github.com/charmbracelet/crush) | ✅ Verified | Provider config (see setup above) | Full tool support, session resume, streaming, headless `crush run` |
 | [Cline](https://github.com/cline/cline) | ✅ Verified | Config (see setup above) | Full tool support, file read/write/edit, bash, session resume, all models |
@@ -214,6 +214,7 @@ src/proxy/
 ├── adapters/
 │   ├── detect.ts          ← Agent detection from request headers
 │   ├── opencode.ts        ← OpenCode adapter
+│   ├── crush.ts           ← Crush (Charm) adapter
 │   └── droid.ts           ← Droid (Factory AI) adapter
 ├── query.ts               ← SDK query options builder
 ├── errors.ts              ← Error classification
@@ -240,7 +241,7 @@ Sessions map agent conversations to Claude SDK sessions. Meridian classifies eve
 | **Undo** | User rolled back messages | Fork at rollback point |
 | **Diverged** | Completely different conversation | Start fresh |
 
-Sessions are stored in-memory (LRU) and persisted to `~/.cache/@rynfar/meridian/sessions.json` for cross-proxy resume.
+Sessions are stored in-memory (LRU) and persisted to `~/.cache/meridian/sessions.json` for cross-proxy resume.
 
 ### Adding a New Agent
 
@@ -277,17 +278,17 @@ See [`adapters/detect.ts`](src/proxy/adapters/detect.ts) and [`adapters/opencode
 
 ## Configuration
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `CLAUDE_PROXY_PORT` | `3456` | Port to listen on |
-| `CLAUDE_PROXY_HOST` | `127.0.0.1` | Host to bind to |
-| `CLAUDE_PROXY_PASSTHROUGH` | unset | Forward tool calls to client instead of executing |
-| `CLAUDE_PROXY_MAX_CONCURRENT` | `10` | Maximum concurrent SDK sessions |
-| `CLAUDE_PROXY_MAX_SESSIONS` | `1000` | In-memory LRU session cache size |
-| `CLAUDE_PROXY_MAX_STORED_SESSIONS` | `10000` | File-based session store capacity |
-| `CLAUDE_PROXY_WORKDIR` | `cwd()` | Default working directory for SDK |
-| `CLAUDE_PROXY_IDLE_TIMEOUT_SECONDS` | `120` | HTTP keep-alive timeout |
-| `CLAUDE_PROXY_TELEMETRY_SIZE` | `1000` | Telemetry ring buffer size |
+| Variable | Alias | Default | Description |
+|----------|-------|---------|-------------|
+| `MERIDIAN_PORT` | `CLAUDE_PROXY_PORT` | `3456` | Port to listen on |
+| `MERIDIAN_HOST` | `CLAUDE_PROXY_HOST` | `127.0.0.1` | Host to bind to |
+| `MERIDIAN_PASSTHROUGH` | `CLAUDE_PROXY_PASSTHROUGH` | unset | Forward tool calls to client instead of executing |
+| `MERIDIAN_MAX_CONCURRENT` | `CLAUDE_PROXY_MAX_CONCURRENT` | `10` | Maximum concurrent SDK sessions |
+| `MERIDIAN_MAX_SESSIONS` | `CLAUDE_PROXY_MAX_SESSIONS` | `1000` | In-memory LRU session cache size |
+| `MERIDIAN_MAX_STORED_SESSIONS` | `CLAUDE_PROXY_MAX_STORED_SESSIONS` | `10000` | File-based session store capacity |
+| `MERIDIAN_WORKDIR` | `CLAUDE_PROXY_WORKDIR` | `cwd()` | Default working directory for SDK |
+| `MERIDIAN_IDLE_TIMEOUT_SECONDS` | `CLAUDE_PROXY_IDLE_TIMEOUT_SECONDS` | `120` | HTTP keep-alive timeout |
+| `MERIDIAN_TELEMETRY_SIZE` | `CLAUDE_PROXY_TELEMETRY_SIZE` | `1000` | Telemetry ring buffer size |
 
 ## Programmatic API
 
@@ -375,7 +376,7 @@ docker compose up -d
 ## Testing
 
 ```bash
-npm test          # 339 unit/integration tests (bun test)
+npm test          # 522 unit/integration tests (bun test)
 npm run build     # Build with bun + tsc
 ```
 
