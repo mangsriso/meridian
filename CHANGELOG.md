@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.24.1](https://github.com/rynfar/meridian/compare/v1.24.0...v1.24.1) (2026-04-01)
+
+
+### Bug Fixes
+
+* prefer system claude binary over cli.js when not running under bun ([#217](https://github.com/rynfar/meridian/issues/217)) ([88a3eff](https://github.com/rynfar/meridian/commit/88a3eff1bf6e978d3442e8738982425a8470c5d6))
+
 ## [1.24.0](https://github.com/rynfar/meridian/compare/v1.23.1...v1.24.0) (2026-04-01)
 
 
