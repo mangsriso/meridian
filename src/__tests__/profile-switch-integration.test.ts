@@ -156,23 +156,15 @@ describe("Session cache eviction on profile switch", () => {
     const app = createTestApp(profiles)
 
     // Store a session in the cache
-    storeSession("test-session-123", {
-      claudeSessionId: "claude-abc",
-      lastAccess: Date.now(),
-      messageCount: 5,
-      lineageHash: "hash123",
-      messageHashes: ["h1", "h2", "h3", "h4", "h5"],
-      sdkMessageUuids: ["u1", "u2", "u3", "u4", "u5"],
-    })
-
-    // Verify session exists
-    const before = lookupSession("test-session-123", [
+    const msgs = [
       { role: "user", content: "a" },
       { role: "assistant", content: "b" },
       { role: "user", content: "c" },
-      { role: "assistant", content: "d" },
-      { role: "user", content: "e" },
-    ])
+    ]
+    storeSession("test-session-123", msgs, "claude-abc")
+
+    // Verify session exists
+    const before = lookupSession("test-session-123", msgs)
     expect(before.type).not.toBe("new")
 
     // Switch profile via API
@@ -184,23 +176,15 @@ describe("Session cache eviction on profile switch", () => {
     expect(res.status).toBe(200)
 
     // Session should be gone — new lookup returns diverged (sessionId known but no cache entry)
-    const after = lookupSession("test-session-123", [
-      { role: "user", content: "a" },
-    ])
+    const after = lookupSession("test-session-123", msgs)
     expect(after.type).toBe("diverged")
   })
 
   test("switching to same profile still clears cache", async () => {
     const app = createTestApp(profiles)
 
-    storeSession("session-same", {
-      claudeSessionId: "claude-same",
-      lastAccess: Date.now(),
-      messageCount: 1,
-      lineageHash: "h",
-      messageHashes: ["m1"],
-      sdkMessageUuids: ["u1"],
-    })
+    const msgs = [{ role: "user", content: "x" }]
+    storeSession("session-same", msgs, "claude-same")
 
     // Switch to first profile (already active)
     await app.fetch(req("/profiles/active", {
@@ -209,7 +193,7 @@ describe("Session cache eviction on profile switch", () => {
       body: JSON.stringify({ profile: "personal" }),
     }))
 
-    const after = lookupSession("session-same", [{ role: "user", content: "x" }])
+    const after = lookupSession("session-same", msgs)
     expect(after.type).toBe("diverged")
   })
 })

@@ -261,7 +261,14 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
         const effortHeader = c.req.header("x-opencode-effort")
         const thinkingHeader = c.req.header("x-opencode-thinking")
         const taskBudgetHeader = c.req.header("x-opencode-task-budget")
-        const betaHeader = c.req.header("anthropic-beta")
+        // NOTE: anthropic-beta headers are intentionally NOT forwarded for
+        // claude-max profiles. These headers trigger API-key billing mode on
+        // Anthropic's servers, causing Max subscribers to be charged extra usage.
+        // Only forward betas for api-type profiles where they are valid.
+        // See: https://github.com/rynfar/meridian/issues/278
+        const betaHeader = profile.type === "api"
+          ? c.req.header("anthropic-beta")
+          : undefined
 
         const effort = effortHeader
           || body.effort
@@ -281,6 +288,9 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
         const betas = betaHeader
           ? betaHeader.split(",").map((b: string) => b.trim()).filter(Boolean)
           : undefined
+        if (!betaHeader && c.req.header("anthropic-beta")) {
+          console.error(`[PROXY] ${requestMeta.requestId} stripped anthropic-beta header (Max subscription — betas trigger extra usage billing)`)
+        }
 
         // Session resume: look up cached Claude SDK session and classify mutation
         const agentSessionId = adapter.getSessionId(c)

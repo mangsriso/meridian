@@ -146,16 +146,34 @@ describe("SDK param passthrough — header overrides", () => {
     expect(capturedOptions.taskBudget).toEqual({ total: 9999 })
   })
 
-  it("anthropic-beta header populates betas array", async () => {
+  it("anthropic-beta header is stripped for claude-max profiles to prevent extra usage billing", async () => {
+    // See: https://github.com/rynfar/meridian/issues/278
     const app = createTestApp()
     await post(app, BASE_BODY, { "anthropic-beta": "context-1m-2025-08-07" })
-    expect(capturedOptions.betas).toEqual(["context-1m-2025-08-07"])
+    expect(capturedOptions.betas).toBeUndefined()
   })
 
-  it("comma-separated anthropic-beta header splits into multiple betas", async () => {
+  it("comma-separated anthropic-beta header is also stripped for claude-max", async () => {
     const app = createTestApp()
     await post(app, BASE_BODY, { "anthropic-beta": "context-1m-2025-08-07, interleaved-thinking-2025-05-14" })
-    expect(capturedOptions.betas).toEqual(["context-1m-2025-08-07", "interleaved-thinking-2025-05-14"])
+    expect(capturedOptions.betas).toBeUndefined()
+  })
+
+  it("anthropic-beta header is forwarded for api-type profiles", async () => {
+    const { app } = createProxyServer({
+      port: 0, host: "127.0.0.1",
+      profiles: [{ id: "apiuser", type: "api", apiKey: "sk-test" }],
+    })
+    await app.fetch(new Request("http://localhost/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": "dummy",
+        "anthropic-beta": "context-1m-2025-08-07",
+      },
+      body: JSON.stringify(BASE_BODY),
+    }))
+    expect(capturedOptions.betas).toEqual(["context-1m-2025-08-07"])
   })
 
   it("malformed x-opencode-thinking header is ignored — request succeeds", async () => {
