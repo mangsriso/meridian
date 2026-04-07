@@ -23,7 +23,7 @@ describe("detectTokenAnomalies", () => {
     expect(detectTokenAnomalies(curr, prev)).toEqual([])
   })
 
-  it("detects context spike (>100% input growth)", () => {
+  it("detects context spike (>60% input growth)", () => {
     const prev = makeSnapshot({ turnNumber: 1, inputTokens: 5000 })
     const curr = makeSnapshot({ turnNumber: 2, inputTokens: 11000 })
     const anomalies = detectTokenAnomalies(curr, prev)

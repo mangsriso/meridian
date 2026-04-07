@@ -922,6 +922,14 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
           })
 
           const nonStreamQueueWaitMs = requestMeta.queueStartedAt - requestMeta.queueEnteredAt
+          checkTokenHealth(
+            requestMeta.requestId,
+            currentSessionId || resumeSessionId,
+            lastUsage,
+            allMessages.length,
+            isResume,
+            passthrough
+          )
           telemetryStore.record({
             requestId: requestMeta.requestId,
             timestamp: Date.now(),
@@ -949,14 +957,6 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
             cacheCreationInputTokens: lastUsage?.cache_creation_input_tokens,
             cacheHitRate: computeCacheHitRate(lastUsage),
           })
-          checkTokenHealth(
-            requestMeta.requestId,
-            currentSessionId || resumeSessionId,
-            lastUsage,
-            allMessages.length,
-            isResume,
-            passthrough
-          )
 
           // Store session for future resume
               if (currentSessionId) {
@@ -1474,6 +1474,14 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
                 })
 
                 const streamQueueWaitMs = requestMeta.queueStartedAt - requestMeta.queueEnteredAt
+                checkTokenHealth(
+                  requestMeta.requestId,
+                  currentSessionId || resumeSessionId,
+                  lastUsage,
+                  allMessages.length,
+                  isResume,
+                  passthrough
+                )
                 telemetryStore.record({
                   requestId: requestMeta.requestId,
                   timestamp: Date.now(),
@@ -1501,14 +1509,6 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
                   cacheCreationInputTokens: lastUsage?.cache_creation_input_tokens,
                   cacheHitRate: computeCacheHitRate(lastUsage),
                 })
-                checkTokenHealth(
-                  requestMeta.requestId,
-                  currentSessionId || resumeSessionId,
-                  lastUsage,
-                  allMessages.length,
-                  isResume,
-                  passthrough
-                )
 
                 if (textEventsForwarded === 0) {
                   claudeLog("response.empty_stream", {
