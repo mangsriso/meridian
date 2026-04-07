@@ -11,11 +11,12 @@
  * fuzzyMatchAgentName, so the SDK processes the correct agent name.
  */
 
-import { describe, it, expect, mock, beforeEach } from "bun:test"
+import { describe, it, expect, mock, beforeEach, afterEach } from "bun:test"
 import { assistantMessage, messageStart, textBlockStart, textDelta, blockStop, messageDelta, messageStop } from "./helpers"
 
 let mockMessages: any[] = []
 let capturedQueryParams: any = null
+let savedPassthrough: string | undefined
 
 mock.module("@anthropic-ai/claude-agent-sdk", () => ({
   query: (params: any) => {
@@ -76,9 +77,16 @@ Available agent types and the tools they have access to:
 
 describe("PreToolUse hook: agent name correction", () => {
   beforeEach(() => {
+    savedPassthrough = process.env.MERIDIAN_PASSTHROUGH
+    process.env.MERIDIAN_PASSTHROUGH = "0"
     mockMessages = [assistantMessage([{ type: "text", text: "Done" }])]
     capturedQueryParams = null
     clearSessionCache()
+  })
+
+  afterEach(() => {
+    if (savedPassthrough !== undefined) process.env.MERIDIAN_PASSTHROUGH = savedPassthrough
+    else delete process.env.MERIDIAN_PASSTHROUGH
   })
 
   it("should include PreToolUse hooks in SDK options", async () => {
@@ -194,9 +202,16 @@ describe("PreToolUse hook: agent name correction", () => {
 
 describe("SDK agents option", () => {
   beforeEach(() => {
+    savedPassthrough = process.env.MERIDIAN_PASSTHROUGH
+    process.env.MERIDIAN_PASSTHROUGH = "0"
     mockMessages = [assistantMessage([{ type: "text", text: "Done" }])]
     capturedQueryParams = null
     clearSessionCache()
+  })
+
+  afterEach(() => {
+    if (savedPassthrough !== undefined) process.env.MERIDIAN_PASSTHROUGH = savedPassthrough
+    else delete process.env.MERIDIAN_PASSTHROUGH
   })
 
   it("should pass agents extracted from Task tool to SDK", async () => {
@@ -262,9 +277,16 @@ describe("SDK agents option", () => {
 
 describe("PreToolUse hook: cleanup of old hacks", () => {
   beforeEach(() => {
+    savedPassthrough = process.env.MERIDIAN_PASSTHROUGH
+    process.env.MERIDIAN_PASSTHROUGH = "0"
     mockMessages = [assistantMessage([{ type: "text", text: "Done" }])]
     capturedQueryParams = null
     clearSessionCache()
+  })
+
+  afterEach(() => {
+    if (savedPassthrough !== undefined) process.env.MERIDIAN_PASSTHROUGH = savedPassthrough
+    else delete process.env.MERIDIAN_PASSTHROUGH
   })
 
   it("should NOT include canUseTool deny for Task", async () => {

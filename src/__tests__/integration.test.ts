@@ -8,7 +8,7 @@
  * But they test the full Hono HTTP stack, SSE parsing, etc.
  */
 
-import { describe, it, expect, mock, beforeAll, afterAll, beforeEach } from "bun:test"
+import { describe, it, expect, mock, beforeAll, afterAll, beforeEach, afterEach } from "bun:test"
 import {
   messageStart,
   textBlockStart,
@@ -85,14 +85,22 @@ async function readStream(response: Response): Promise<string> {
 
 describe("Integration: Full Anthropic API tool loop", () => {
   let app: any
+  let savedPassthrough: string | undefined
 
   beforeAll(() => {
     app = createTestApp()
   })
 
   beforeEach(() => {
+    savedPassthrough = process.env.MERIDIAN_PASSTHROUGH
+    process.env.MERIDIAN_PASSTHROUGH = "0"
     mockMessages = []
     capturedQueryParams = null
+  })
+
+  afterEach(() => {
+    if (savedPassthrough !== undefined) process.env.MERIDIAN_PASSTHROUGH = savedPassthrough
+    else delete process.env.MERIDIAN_PASSTHROUGH
   })
 
   it("Step 1: Initial request → Claude responds with tool_use", async () => {

@@ -9,11 +9,12 @@
  * Also verifies OpenCode requests are completely unaffected (backward compat).
  */
 
-import { describe, it, expect, mock, beforeEach } from "bun:test"
+import { describe, it, expect, mock, beforeEach, afterEach } from "bun:test"
 import { assistantMessage } from "./helpers"
 
 let mockMessages: any[] = []
 let capturedQueryParams: any = null
+let savedPassthrough: string | undefined
 
 mock.module("@anthropic-ai/claude-agent-sdk", () => ({
   query: (params: any) => {
@@ -113,9 +114,16 @@ Available agent types and the tools they have access to:
 
 describe("Droid adapter: MCP server name", () => {
   beforeEach(() => {
+    savedPassthrough = process.env.MERIDIAN_PASSTHROUGH
+    process.env.MERIDIAN_PASSTHROUGH = "0"
     mockMessages = [assistantMessage([{ type: "text", text: "Done" }])]
     capturedQueryParams = null
     clearSessionCache()
+  })
+
+  afterEach(() => {
+    if (savedPassthrough !== undefined) process.env.MERIDIAN_PASSTHROUGH = savedPassthrough
+    else delete process.env.MERIDIAN_PASSTHROUGH
   })
 
   it("uses 'droid' MCP server in SDK options when User-Agent is factory-cli", async () => {
@@ -139,9 +147,16 @@ describe("Droid adapter: MCP server name", () => {
 
 describe("Droid adapter: allowed tools", () => {
   beforeEach(() => {
+    savedPassthrough = process.env.MERIDIAN_PASSTHROUGH
+    process.env.MERIDIAN_PASSTHROUGH = "0"
     mockMessages = [assistantMessage([{ type: "text", text: "Done" }])]
     capturedQueryParams = null
     clearSessionCache()
+  })
+
+  afterEach(() => {
+    if (savedPassthrough !== undefined) process.env.MERIDIAN_PASSTHROUGH = savedPassthrough
+    else delete process.env.MERIDIAN_PASSTHROUGH
   })
 
   it("allowed tools have mcp__droid__ prefix for Droid requests", async () => {
@@ -167,9 +182,16 @@ describe("Droid adapter: allowed tools", () => {
 
 describe("Droid adapter: no subagent routing", () => {
   beforeEach(() => {
+    savedPassthrough = process.env.MERIDIAN_PASSTHROUGH
+    process.env.MERIDIAN_PASSTHROUGH = "0"
     mockMessages = [assistantMessage([{ type: "text", text: "Done" }])]
     capturedQueryParams = null
     clearSessionCache()
+  })
+
+  afterEach(() => {
+    if (savedPassthrough !== undefined) process.env.MERIDIAN_PASSTHROUGH = savedPassthrough
+    else delete process.env.MERIDIAN_PASSTHROUGH
   })
 
   it("does not pass SDK agents to query when Droid sends Task-like tool", async () => {
@@ -210,9 +232,16 @@ describe("Droid adapter: no subagent routing", () => {
 
 describe("Droid adapter: CWD extraction from system-reminder", () => {
   beforeEach(() => {
+    savedPassthrough = process.env.MERIDIAN_PASSTHROUGH
+    process.env.MERIDIAN_PASSTHROUGH = "0"
     mockMessages = [assistantMessage([{ type: "text", text: "Done" }])]
     capturedQueryParams = null
     clearSessionCache()
+  })
+
+  afterEach(() => {
+    if (savedPassthrough !== undefined) process.env.MERIDIAN_PASSTHROUGH = savedPassthrough
+    else delete process.env.MERIDIAN_PASSTHROUGH
   })
 
   it("uses CWD from system-reminder for workdir in SDK options", async () => {
@@ -231,9 +260,16 @@ describe("Droid adapter: CWD extraction from system-reminder", () => {
 
 describe("Droid adapter: session management via fingerprint", () => {
   beforeEach(() => {
+    savedPassthrough = process.env.MERIDIAN_PASSTHROUGH
+    process.env.MERIDIAN_PASSTHROUGH = "0"
     mockMessages = [assistantMessage([{ type: "text", text: "Done" }])]
     capturedQueryParams = null
     clearSessionCache()
+  })
+
+  afterEach(() => {
+    if (savedPassthrough !== undefined) process.env.MERIDIAN_PASSTHROUGH = savedPassthrough
+    else delete process.env.MERIDIAN_PASSTHROUGH
   })
 
   it("handles Droid request without session header (no crash)", async () => {
@@ -275,9 +311,16 @@ describe("Droid adapter: session management via fingerprint", () => {
 
 describe("Droid adapter: response format", () => {
   beforeEach(() => {
+    savedPassthrough = process.env.MERIDIAN_PASSTHROUGH
+    process.env.MERIDIAN_PASSTHROUGH = "0"
     mockMessages = [assistantMessage([{ type: "text", text: "Droid response" }])]
     capturedQueryParams = null
     clearSessionCache()
+  })
+
+  afterEach(() => {
+    if (savedPassthrough !== undefined) process.env.MERIDIAN_PASSTHROUGH = savedPassthrough
+    else delete process.env.MERIDIAN_PASSTHROUGH
   })
 
   it("returns valid Anthropic-format response for Droid requests", async () => {
@@ -302,9 +345,16 @@ describe("Droid adapter: response format", () => {
 
 describe("Droid adapter: always internal mode (usesPassthrough=false)", () => {
   beforeEach(() => {
+    savedPassthrough = process.env.MERIDIAN_PASSTHROUGH
+    process.env.MERIDIAN_PASSTHROUGH = "0"
     mockMessages = [assistantMessage([{ type: "text", text: "Done" }])]
     capturedQueryParams = null
     clearSessionCache()
+  })
+
+  afterEach(() => {
+    if (savedPassthrough !== undefined) process.env.MERIDIAN_PASSTHROUGH = savedPassthrough
+    else delete process.env.MERIDIAN_PASSTHROUGH
   })
 
   it("Droid requests use internal MCP server even when CLAUDE_PROXY_PASSTHROUGH=1", async () => {
@@ -332,20 +382,29 @@ describe("Droid adapter: always internal mode (usesPassthrough=false)", () => {
   })
 
   it("openCodeAdapter.usesPassthrough is undefined — verified at adapter unit level, not integration level", () => {
-    // The openCodeAdapter deliberately does NOT implement usesPassthrough()
-    // so the env var continues to govern passthrough mode for OpenCode.
+    // The openCodeAdapter now implements usesPassthrough() and defaults to true
+    // (passthrough mode) unless MERIDIAN_PASSTHROUGH=0 is set.
     // Full passthrough integration is covered by proxy-passthrough-concept.test.ts.
     // Here we just confirm the adapter contract at the unit level.
     const { openCodeAdapter } = require("../proxy/adapters/opencode")
-    expect(openCodeAdapter.usesPassthrough).toBeUndefined()
+    expect(typeof openCodeAdapter.usesPassthrough).toBe("function")
+    // With MERIDIAN_PASSTHROUGH=0 set in beforeEach, it returns false
+    expect(openCodeAdapter.usesPassthrough()).toBe(false)
   })
 })
 
 describe("Backward compatibility: OpenCode unaffected", () => {
   beforeEach(() => {
+    savedPassthrough = process.env.MERIDIAN_PASSTHROUGH
+    process.env.MERIDIAN_PASSTHROUGH = "0"
     mockMessages = [assistantMessage([{ type: "text", text: "OpenCode response" }])]
     capturedQueryParams = null
     clearSessionCache()
+  })
+
+  afterEach(() => {
+    if (savedPassthrough !== undefined) process.env.MERIDIAN_PASSTHROUGH = savedPassthrough
+    else delete process.env.MERIDIAN_PASSTHROUGH
   })
 
   it("OpenCode requests without User-Agent header still work", async () => {

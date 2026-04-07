@@ -241,8 +241,18 @@ describe("detectAdapter — adapter contracts", () => {
   })
 
   it("detected opencode adapter has no usesPassthrough — defers to env var", () => {
+    // The openCodeAdapter now implements usesPassthrough() and defaults to true
+    // (passthrough mode) unless overridden by MERIDIAN_PASSTHROUGH=0.
     const adapter = detectAdapter(makeContext(""))
-    expect(adapter.usesPassthrough).toBeUndefined()
+    expect(typeof adapter.usesPassthrough).toBe("function")
+    // Default behavior: passthrough is true when no env var overrides it
+    const saved = process.env.MERIDIAN_PASSTHROUGH
+    delete process.env.MERIDIAN_PASSTHROUGH
+    try {
+      expect(adapter.usesPassthrough!()).toBe(true)
+    } finally {
+      if (saved !== undefined) process.env.MERIDIAN_PASSTHROUGH = saved
+    }
   })
 
   it("detected crush adapter has no usesPassthrough — defers to env var", () => {

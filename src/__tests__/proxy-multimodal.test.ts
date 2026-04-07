@@ -5,7 +5,7 @@
  * preserved and passed to the SDK as structured messages.
  */
 
-import { describe, it, expect, mock, beforeEach } from "bun:test"
+import { describe, it, expect, mock, beforeEach, afterEach } from "bun:test"
 import { assistantMessage } from "./helpers"
 
 let capturedQueryParams: any = null
@@ -43,6 +43,8 @@ mock.module("../mcpTools", () => ({
 
 const { createProxyServer, clearSessionCache } = await import("../proxy/server")
 
+let savedPassthrough: string | undefined
+
 function createTestApp() {
   const { app } = createProxyServer({ port: 0, host: "127.0.0.1" })
   return app
@@ -58,8 +60,15 @@ async function post(app: any, body: any) {
 
 describe("Multimodal content", () => {
   beforeEach(() => {
+    savedPassthrough = process.env.MERIDIAN_PASSTHROUGH
+    process.env.MERIDIAN_PASSTHROUGH = "0"
     capturedQueryParams = null
     clearSessionCache()
+  })
+
+  afterEach(() => {
+    if (savedPassthrough !== undefined) process.env.MERIDIAN_PASSTHROUGH = savedPassthrough
+    else delete process.env.MERIDIAN_PASSTHROUGH
   })
 
   it("should use text prompt for text-only messages", async () => {
