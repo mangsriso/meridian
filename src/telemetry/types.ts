@@ -55,6 +55,9 @@ export interface RequestMetric {
   /** Tool names discovered via ToolSearch this request (deferred tools that got called) */
   discoveredTools?: string[]
 
+  /** Cumulative count of tools discovered via ToolSearch across the entire session */
+  sessionDiscoveredCount?: number
+
   /** Number of messages in the request */
   messageCount?: number
 

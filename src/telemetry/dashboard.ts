@@ -279,7 +279,7 @@ function render(s, reqs, logs) {
       + '<td class="mono">' + ago(r.timestamp) + '</td>'
       + '<td>' + (r.adapter || '—') + '</td>'
       + '<td>' + (r.requestModel || r.model) + '<br><span style="font-size:10px;color:var(--muted)">' + r.model + '</span></td>'
-      + '<td>' + r.mode + (r.hasDeferredTools ? (function() { var disc = (r.discoveredTools || []).length; var loaded = ((r.toolCount || 0) - (r.deferredToolCount || 0)) + disc; var deferred = (r.deferredToolCount || 0) - disc; return '<br><span style="font-size:10px;color:var(--purple)">loaded=' + loaded + ' deferred=' + Math.max(0, deferred) + '</span>' + (disc > 0 ? '<br><span style="font-size:10px;color:var(--green)">+' + r.discoveredTools.join(', +') + '</span>' : ''); })() : '') + '</td>'
+      + '<td>' + r.mode + (r.hasDeferredTools ? (function() { var sessDisc = r.sessionDiscoveredCount || 0; var loaded = ((r.toolCount || 0) - (r.deferredToolCount || 0)) + sessDisc; var deferred = Math.max(0, (r.deferredToolCount || 0) - sessDisc); var newDisc = r.discoveredTools || []; return '<br><span style="font-size:10px;color:var(--purple)">loaded=' + loaded + ' deferred=' + deferred + '</span>' + (newDisc.length > 0 ? '<br><span style="font-size:10px;color:var(--green)">+' + newDisc.join(', +') + '</span>' : ''); })() : '') + '</td>'
       + '<td class="mono">' + sessionShort + ' ' + lineageBadge + '<br><span style="font-size:10px;color:var(--muted)">' + msgCount + ' msgs</span></td>'
       + '<td class="' + statusClass + '">' + statusText + '</td>'
       + '<td class="mono">' + ms(r.queueWaitMs) + '</td>'

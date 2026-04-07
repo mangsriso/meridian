@@ -219,6 +219,9 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
   // Restore persisted active profile from last session
   restoreActiveProfile(finalConfig.profiles)
 
+  // Track cumulative discovered tools per SDK session (survives across requests)
+  const sessionDiscoveredTools = new Map<string, Set<string>>()
+
   const app = new Hono()
 
   app.use("*", cors())
@@ -873,9 +876,14 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
               durationMs: Date.now() - upstreamStartAt
             })
             if (lastUsage) logUsage(requestMeta.requestId, lastUsage)
-            if (discoveredTools.size > 0) {
-              const names = [...discoveredTools].join(", ")
-              console.error(`[PROXY] ${requestMeta.requestId} discovered=${discoveredTools.size} (${names})`)
+            // Accumulate discovered tools into the session-level set
+            const sessId = currentSessionId || resumeSessionId
+            if (sessId && discoveredTools.size > 0) {
+              if (!sessionDiscoveredTools.has(sessId)) sessionDiscoveredTools.set(sessId, new Set())
+              for (const t of discoveredTools) sessionDiscoveredTools.get(sessId)!.add(t)
+              const newNames = [...discoveredTools].join(", ")
+              const allNames = [...sessionDiscoveredTools.get(sessId)!]
+              console.error(`[PROXY] ${requestMeta.requestId} discovered=${discoveredTools.size} (${newNames}) session_total=${allNames.length}`)
             }
           } catch (error) {
             const stderrOutput = stderrLines.join("\n").trim()
@@ -976,6 +984,7 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
             deferredToolCount: hasDeferredTools ? deferredToolCount : undefined,
             toolCount,
             discoveredTools: discoveredTools.size > 0 ? [...discoveredTools] : undefined,
+            sessionDiscoveredCount: sessionDiscoveredTools.get(currentSessionId || resumeSessionId || "")?.size,
             lineageType,
             messageCount: allMessages.length,
             sdkSessionId: currentSessionId || resumeSessionId,
@@ -1394,9 +1403,14 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
                 textEventsForwarded
               })
               if (lastUsage) logUsage(requestMeta.requestId, lastUsage)
-              if (discoveredTools.size > 0) {
-                const names = [...discoveredTools].join(", ")
-                console.error(`[PROXY] ${requestMeta.requestId} discovered=${discoveredTools.size} (${names})`)
+              // Accumulate discovered tools into the session-level set
+              const sessId = currentSessionId || resumeSessionId
+              if (sessId && discoveredTools.size > 0) {
+                if (!sessionDiscoveredTools.has(sessId)) sessionDiscoveredTools.set(sessId, new Set())
+                for (const t of discoveredTools) sessionDiscoveredTools.get(sessId)!.add(t)
+                const newNames = [...discoveredTools].join(", ")
+                const allNames = [...sessionDiscoveredTools.get(sessId)!]
+                console.error(`[PROXY] ${requestMeta.requestId} discovered=${discoveredTools.size} (${newNames}) session_total=${allNames.length}`)
               }
 
               // Store session for future resume
@@ -1543,6 +1557,7 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
                   deferredToolCount: hasDeferredTools ? deferredToolCount : undefined,
                   toolCount,
                   discoveredTools: discoveredTools.size > 0 ? [...discoveredTools] : undefined,
+            sessionDiscoveredCount: sessionDiscoveredTools.get(currentSessionId || resumeSessionId || "")?.size,
                   lineageType,
                   messageCount: allMessages.length,
                   sdkSessionId: currentSessionId || resumeSessionId,
