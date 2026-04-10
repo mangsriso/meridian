@@ -158,7 +158,9 @@ const sessionExpiryMap = new Map<string, number>()
 
 /**
  * Look up which profile a session is sticky to.
- * Returns undefined if the session has no affinity yet.
+ * Returns undefined if the session has no affinity yet, or if the
+ * sticky profile is currently in cooldown (break stickiness to avoid
+ * sending requests to a rate-limited profile repeatedly).
  */
 export function getSessionProfile(sessionId: string | undefined): string | undefined {
   if (!sessionId) return undefined
@@ -166,6 +168,16 @@ export function getSessionProfile(sessionId: string | undefined): string | undef
   if (!profileId) return undefined
   const expiry = sessionExpiryMap.get(sessionId) ?? 0
   if (Date.now() > expiry) {
+    sessionProfileMap.delete(sessionId)
+    sessionExpiryMap.delete(sessionId)
+    return undefined
+  }
+  // Break stickiness if the profile is in cooldown — better to start
+  // a fresh session on a healthy profile than fail repeatedly on a
+  // rate-limited one. The session will be re-bound to the new profile.
+  const health = healthMap.get(profileId)
+  if (health && health.cooldownUntil > Date.now()) {
+    console.error(`[POOL] Breaking session stickiness for "${profileId}" (in cooldown) — will select new profile`)
     sessionProfileMap.delete(sessionId)
     sessionExpiryMap.delete(sessionId)
     return undefined
