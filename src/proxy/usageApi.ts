@@ -84,8 +84,18 @@ function readCredentials(configDir: string): { accessToken: string; refreshToken
 
 const OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 
-/** Refresh an expired access token using the refresh token */
-function refreshAccessToken(refreshToken: string): Promise<string | null> {
+interface RefreshResult {
+  accessToken: string
+  refreshToken?: string
+  expiresIn?: number
+}
+
+/**
+ * Refresh an access token. Returns new tokens.
+ * CRITICAL: Refresh tokens are single-use — must persist the new
+ * refresh_token from the response or subsequent refreshes will fail.
+ */
+function refreshAccessToken(refreshToken: string): Promise<RefreshResult | null> {
   return new Promise((resolve) => {
     const body = new URLSearchParams({
       grant_type: "refresh_token",
@@ -108,7 +118,12 @@ function refreshAccessToken(refreshToken: string): Promise<string | null> {
         if (res.statusCode !== 200) { resolve(null); return }
         try {
           const parsed = JSON.parse(data)
-          resolve(parsed.access_token ?? null)
+          if (!parsed.access_token) { resolve(null); return }
+          resolve({
+            accessToken: parsed.access_token,
+            refreshToken: parsed.refresh_token,
+            expiresIn: parsed.expires_in,
+          })
         } catch { resolve(null) }
       })
     })
@@ -117,6 +132,19 @@ function refreshAccessToken(refreshToken: string): Promise<string | null> {
     req.write(body)
     req.end()
   })
+}
+
+/** Write refreshed tokens back to credentials file so next refresh works */
+function persistRefreshedTokens(configDir: string, result: RefreshResult): void {
+  const credsPath = join(configDir, ".credentials.json")
+  try {
+    const raw = JSON.parse(readFileSync(credsPath, "utf-8"))
+    const oauth = raw.claudeAiOauth || raw
+    oauth.accessToken = result.accessToken
+    if (result.refreshToken) oauth.refreshToken = result.refreshToken
+    if (result.expiresIn) oauth.expiresAt = Date.now() + result.expiresIn * 1000
+    writeFileSync(credsPath, JSON.stringify(raw, null, 2))
+  } catch { /* best effort */ }
 }
 
 // ── Anthropic API Fetch ──────────────────────────────────────────────
@@ -143,9 +171,13 @@ function fetchUsageFromApi(accessToken: string): Promise<RealUsage | null> {
         }
         try {
           const data = JSON.parse(body)
+          // Anthropic returns utilization as percent (e.g. 72.0 = 72%)
+          // NOT as ratio (0.72) — don't multiply by 100
+          const fh = data.five_hour?.utilization ?? 0
+          const sd = data.seven_day?.utilization ?? 0
           resolve({
-            fiveHourPercent: Math.round((data.five_hour?.utilization ?? 0) * 100),
-            weeklyPercent: Math.round((data.seven_day?.utilization ?? 0) * 100),
+            fiveHourPercent: Math.round(fh),
+            weeklyPercent: Math.round(sd),
             fiveHourResetsAt: data.five_hour?.resets_at,
             weeklyResetsAt: data.seven_day?.resets_at,
             fetchedAt: Date.now(),
@@ -207,24 +239,39 @@ async function pollProfile(profileId: string, configDir: string): Promise<void> 
     // Don't return — still try API to get fresher data
   }
 
-  // Priority 3: Anthropic API (only when no fresh cache available)
+  // Priority 3: Anthropic API
+  // Rate limit is per-access-token (~5 req/token, never resets).
+  // Fix: if 429 → refresh token → get NEW token → retry with fresh limit.
   const creds = readCredentials(configDir)
   if (!creds) return
 
-  // Refresh token if expired before calling usage API
+  // Try with current token first (unless expired)
   let token = creds.accessToken
   if (creds.expired && creds.refreshToken) {
-    const newToken = await refreshAccessToken(creds.refreshToken)
-    if (newToken) {
-      token = newToken
+    const result = await refreshAccessToken(creds.refreshToken)
+    if (result) {
+      token = result.accessToken
+      persistRefreshedTokens(configDir, result)
       console.error(`[POOL] Refreshed expired token for "${profileId}"`)
     }
   }
 
-  const apiData = await fetchUsageFromApi(token)
+  let apiData = await fetchUsageFromApi(token)
+
+  // 429 = token rate limited → refresh to get NEW token with fresh limit
+  // Refresh tokens are single-use: must persist new tokens to disk
+  if (!apiData && creds.refreshToken) {
+    console.error(`[POOL] "${profileId}" API failed — refreshing token for fresh rate limit window`)
+    const result = await refreshAccessToken(creds.refreshToken)
+    if (result) {
+      persistRefreshedTokens(configDir, result)
+      apiData = await fetchUsageFromApi(result.accessToken)
+    }
+  }
+
   if (apiData) {
     cache.set(profileId, apiData)
-    writeMeridianCache(profileId, apiData)  // persist to disk
+    writeMeridianCache(profileId, apiData)
     console.error(`[POOL] Fetched real usage for "${profileId}": 5h=${apiData.fiveHourPercent}% 7d=${apiData.weeklyPercent}%`)
   }
   // If API failed, keep existing in-memory cache (from disk or prior API success)
