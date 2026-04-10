@@ -68,17 +68,55 @@ function readOmcCache(configDir: string): RealUsage | null {
 
 // ── Credentials Reader ───────────────────────────────────────────────
 
-function readCredentials(configDir: string): { accessToken: string } | null {
+function readCredentials(configDir: string): { accessToken: string; refreshToken?: string; expired: boolean } | null {
   const credsPath = join(configDir, ".credentials.json")
   if (!existsSync(credsPath)) return null
   try {
     const raw = JSON.parse(readFileSync(credsPath, "utf-8")) as CredentialsFile
-    const token = raw.claudeAiOauth?.accessToken
-    if (!token) return null
-    return { accessToken: token }
+    const oauth = raw.claudeAiOauth
+    if (!oauth?.accessToken) return null
+    const expired = oauth.expiresAt != null && oauth.expiresAt <= Date.now()
+    return { accessToken: oauth.accessToken, refreshToken: oauth.refreshToken, expired }
   } catch {
     return null
   }
+}
+
+const OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+
+/** Refresh an expired access token using the refresh token */
+function refreshAccessToken(refreshToken: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    const body = new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: refreshToken,
+      client_id: OAUTH_CLIENT_ID,
+    }).toString()
+    const req = https.request({
+      hostname: "platform.claude.com",
+      path: "/v1/oauth/token",
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Content-Length": Buffer.byteLength(body).toString(),
+      },
+      timeout: API_TIMEOUT_MS,
+    }, (res) => {
+      let data = ""
+      res.on("data", (chunk: Buffer) => { data += chunk.toString() })
+      res.on("end", () => {
+        if (res.statusCode !== 200) { resolve(null); return }
+        try {
+          const parsed = JSON.parse(data)
+          resolve(parsed.access_token ?? null)
+        } catch { resolve(null) }
+      })
+    })
+    req.on("error", () => resolve(null))
+    req.on("timeout", () => { req.destroy(); resolve(null) })
+    req.write(body)
+    req.end()
+  })
 }
 
 // ── Anthropic API Fetch ──────────────────────────────────────────────
@@ -91,7 +129,8 @@ function fetchUsageFromApi(accessToken: string): Promise<RealUsage | null> {
       method: "GET",
       headers: {
         "Authorization": `Bearer ${accessToken}`,
-        "Accept": "application/json",
+        "anthropic-beta": "oauth-2025-04-20",
+        "Content-Type": "application/json",
       },
       timeout: API_TIMEOUT_MS,
     }, (res) => {
@@ -172,7 +211,17 @@ async function pollProfile(profileId: string, configDir: string): Promise<void> 
   const creds = readCredentials(configDir)
   if (!creds) return
 
-  const apiData = await fetchUsageFromApi(creds.accessToken)
+  // Refresh token if expired before calling usage API
+  let token = creds.accessToken
+  if (creds.expired && creds.refreshToken) {
+    const newToken = await refreshAccessToken(creds.refreshToken)
+    if (newToken) {
+      token = newToken
+      console.error(`[POOL] Refreshed expired token for "${profileId}"`)
+    }
+  }
+
+  const apiData = await fetchUsageFromApi(token)
   if (apiData) {
     cache.set(profileId, apiData)
     writeMeridianCache(profileId, apiData)  // persist to disk
