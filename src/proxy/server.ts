@@ -27,7 +27,7 @@ import { detectAdapter } from "./adapters/detect"
 import { buildQueryOptions, type QueryContext } from "./query"
 import { resolveProfile, listProfiles, setActiveProfile, getActiveProfileId, getEffectiveProfiles, restoreActiveProfile } from "./profiles"
 import { selectProfile, recordSuccess, recordRateLimit, getPoolStatus, getSessionProfile, bindSessionProfile, buildRateLimitHeaders } from "./pool"
-import { getAllProfileUsage } from "./usageApi"
+import { startUsagePoller, getCachedUsage } from "./usageApi"
 import { filterBetasForProfile, getBetaPolicyFromEnv } from "./betas"
 import { createFileChangeHook, extractFileChangesFromMessages, formatFileChangeSummary, type FileChange } from "./fileChanges"
 import { detectTokenAnomalies, formatAnomalyAlerts, type TokenSnapshot } from "./tokenHealth"
@@ -199,6 +199,16 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
 
   // Restore persisted active profile from last session
   restoreActiveProfile(finalConfig.profiles)
+
+  // Start background usage poller after a delay — profiles may not be
+  // loaded from disk yet at startup (5s TTL disk cache).
+  setTimeout(() => {
+    const effectiveForPoller = getEffectiveProfiles(finalConfig.profiles)
+    if (effectiveForPoller.length > 0) {
+      startUsagePoller(effectiveForPoller.map(p => ({ id: p.id, configDir: p.claudeConfigDir })))
+      console.error(`[POOL] Usage poller started for ${effectiveForPoller.length} profiles: ${effectiveForPoller.map(p => p.id).join(", ")}`)
+    }
+  }, 6_000)
 
   // Track cumulative discovered tools per SDK session (survives across requests)
   const sessionDiscoveredTools = new Map<string, Set<string>>()
@@ -1849,14 +1859,11 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
     return c.json({ success: true, activeProfile: body.profile })
   })
 
-  app.get("/pool/status", async (c) => {
-    // Merge pool health data with real Anthropic usage data
+  app.get("/pool/status", (c) => {
+    // Read from cache only — background poller handles API calls
     const poolProfiles = getPoolStatus()
-    const effective = getEffectiveProfiles(finalConfig.profiles)
-    const profileConfigs = effective.map(p => ({ id: p.id, configDir: p.claudeConfigDir }))
-    const realUsage = await getAllProfileUsage(profileConfigs)
     const merged = poolProfiles.map(p => {
-      const real = realUsage.get(p.profileId)
+      const real = getCachedUsage(p.profileId)
       return {
         ...p,
         realUsage: real ? {
@@ -1865,6 +1872,7 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
           fiveHourResetsAt: real.fiveHourResetsAt,
           weeklyResetsAt: real.weeklyResetsAt,
           fetchedAt: real.fetchedAt,
+          source: real.source,
         } : null,
       }
     })

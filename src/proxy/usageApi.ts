@@ -1,10 +1,14 @@
 /**
- * Fetch real rate limit usage from Anthropic OAuth API per profile.
+ * Real rate limit usage from Anthropic OAuth API — background poller.
  *
- * Reads OAuth credentials from each profile's CLAUDE_CONFIG_DIR,
- * calls api.anthropic.com/api/oauth/usage, and caches results.
+ * Architecture:
+ *   1. OMC cache file (if < 15min old) → use directly, no API call
+ *   2. In-memory cache (if < 5min old) → use directly
+ *   3. Background poll from Anthropic API → updates cache silently
+ *   4. Self-tracked token estimates → always-available fallback (in pool.ts)
  *
- * Based on OMC (oh-my-claudecode) usage-api.js pattern.
+ * CRITICAL: /pool/status NEVER calls the API — it only reads cache.
+ * Background poller runs every 5 minutes to avoid rate limiting.
  */
 
 import { readFileSync, existsSync } from "node:fs"
@@ -18,7 +22,7 @@ export interface RealUsage {
   fiveHourResetsAt?: string
   weeklyResetsAt?: string
   fetchedAt: number
-  error?: string
+  source: "anthropic-api" | "omc-cache" | "stale"
 }
 
 interface CredentialsFile {
@@ -29,27 +33,57 @@ interface CredentialsFile {
   }
 }
 
-// Cache per profile — poll every 60s, stale after 5min
-const CACHE_TTL_MS = 60_000
-const STALE_MS = 5 * 60_000
-const cache = new Map<string, { data: RealUsage; fetchedAt: number }>()
+// ── Cache ────────────────────────────────────────────────────────────
 
-/** Read OAuth credentials from a profile's config directory */
-function readCredentials(configDir: string): { accessToken: string; refreshToken?: string } | null {
-  const credsPath = join(configDir, ".credentials.json")
-  if (!existsSync(credsPath)) return null
+const OMC_CACHE_MAX_AGE_MS = 2 * 60 * 60_000  // OMC cache valid for 2 hours (stale data >> no data)
+const POLL_INTERVAL_MS = 5 * 60_000         // Background poll every 5 min
+const API_TIMEOUT_MS = 10_000
+
+const cache = new Map<string, RealUsage>()
+let pollerInterval: ReturnType<typeof setInterval> | null = null
+let registeredProfiles: Array<{ id: string; configDir: string }> = []
+
+// ── OMC Cache Reader ─────────────────────────────────────────────────
+
+function readOmcCache(configDir: string): RealUsage | null {
+  const cachePath = join(configDir, "plugins", "oh-my-claudecode", ".usage-cache.json")
+  if (!existsSync(cachePath)) return null
   try {
-    const raw = JSON.parse(readFileSync(credsPath, "utf-8")) as CredentialsFile
-    const oauth = raw.claudeAiOauth
-    if (!oauth?.accessToken) return null
-    return { accessToken: oauth.accessToken, refreshToken: oauth.refreshToken }
+    const raw = JSON.parse(readFileSync(cachePath, "utf-8"))
+    if (raw.error || !raw.data) return null
+    const age = Date.now() - (raw.timestamp ?? 0)
+    if (age > OMC_CACHE_MAX_AGE_MS) return null  // too stale
+    return {
+      fiveHourPercent: raw.data.fiveHourPercent ?? -1,
+      weeklyPercent: raw.data.weeklyPercent ?? -1,
+      fiveHourResetsAt: raw.data.fiveHourResetsAt,
+      weeklyResetsAt: raw.data.weeklyResetsAt,
+      fetchedAt: raw.timestamp ?? Date.now(),
+      source: "omc-cache",
+    }
   } catch {
     return null
   }
 }
 
-/** Fetch usage from Anthropic API */
-function fetchUsage(accessToken: string): Promise<RealUsage> {
+// ── Credentials Reader ───────────────────────────────────────────────
+
+function readCredentials(configDir: string): { accessToken: string } | null {
+  const credsPath = join(configDir, ".credentials.json")
+  if (!existsSync(credsPath)) return null
+  try {
+    const raw = JSON.parse(readFileSync(credsPath, "utf-8")) as CredentialsFile
+    const token = raw.claudeAiOauth?.accessToken
+    if (!token) return null
+    return { accessToken: token }
+  } catch {
+    return null
+  }
+}
+
+// ── Anthropic API Fetch ──────────────────────────────────────────────
+
+function fetchUsageFromApi(accessToken: string): Promise<RealUsage | null> {
   return new Promise((resolve) => {
     const req = https.request({
       hostname: "api.anthropic.com",
@@ -59,120 +93,107 @@ function fetchUsage(accessToken: string): Promise<RealUsage> {
         "Authorization": `Bearer ${accessToken}`,
         "Accept": "application/json",
       },
-      timeout: 10_000,
+      timeout: API_TIMEOUT_MS,
     }, (res) => {
       let body = ""
       res.on("data", (chunk: Buffer) => { body += chunk.toString() })
       res.on("end", () => {
+        if (res.statusCode !== 200) {
+          resolve(null)  // rate limited or error — don't overwrite cache
+          return
+        }
         try {
-          if (res.statusCode !== 200) {
-            resolve({ fiveHourPercent: -1, weeklyPercent: -1, fetchedAt: Date.now(), error: `HTTP ${res.statusCode}` })
-            return
-          }
           const data = JSON.parse(body)
-          // Anthropic returns: { five_hour: { utilization: 0.02 }, seven_day: { utilization: 0.67 } }
-          const fh = data.five_hour?.utilization ?? 0
-          const sd = data.seven_day?.utilization ?? 0
           resolve({
-            fiveHourPercent: Math.round(fh * 100),
-            weeklyPercent: Math.round(sd * 100),
+            fiveHourPercent: Math.round((data.five_hour?.utilization ?? 0) * 100),
+            weeklyPercent: Math.round((data.seven_day?.utilization ?? 0) * 100),
             fiveHourResetsAt: data.five_hour?.resets_at,
             weeklyResetsAt: data.seven_day?.resets_at,
             fetchedAt: Date.now(),
+            source: "anthropic-api",
           })
         } catch {
-          resolve({ fiveHourPercent: -1, weeklyPercent: -1, fetchedAt: Date.now(), error: "parse error" })
+          resolve(null)
         }
       })
     })
-    req.on("error", (err) => {
-      resolve({ fiveHourPercent: -1, weeklyPercent: -1, fetchedAt: Date.now(), error: err.message })
-    })
-    req.on("timeout", () => {
-      req.destroy()
-      resolve({ fiveHourPercent: -1, weeklyPercent: -1, fetchedAt: Date.now(), error: "timeout" })
-    })
+    req.on("error", () => resolve(null))
+    req.on("timeout", () => { req.destroy(); resolve(null) })
     req.end()
   })
 }
 
-/**
- * Get real usage for a profile. Cached with 60s TTL.
- * Returns null if no credentials found or configDir not set.
- */
-/**
- * Read OMC usage cache file as fallback when API call fails.
- * OMC writes to {configDir}/plugins/oh-my-claudecode/.usage-cache.json
- */
-function readOmcCache(configDir: string): RealUsage | null {
-  const cachePath = join(configDir, "plugins", "oh-my-claudecode", ".usage-cache.json")
-  if (!existsSync(cachePath)) return null
-  try {
-    const raw = JSON.parse(readFileSync(cachePath, "utf-8"))
-    if (raw.error || !raw.data) return null
-    return {
-      fiveHourPercent: raw.data.fiveHourPercent ?? -1,
-      weeklyPercent: raw.data.weeklyPercent ?? -1,
-      fiveHourResetsAt: raw.data.fiveHourResetsAt,
-      weeklyResetsAt: raw.data.weeklyResetsAt,
-      fetchedAt: raw.timestamp ?? Date.now(),
-    }
-  } catch {
-    return null
-  }
-}
+// ── Background Poller ────────────────────────────────────────────────
 
-export async function getRealUsage(profileId: string, configDir?: string): Promise<RealUsage | null> {
-  const dir = configDir || join(homedir(), ".claude")
-
-  // Check cache
-  const cached = cache.get(profileId)
-  if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) {
-    return cached.data
-  }
-
-  // Read credentials
-  const creds = readCredentials(dir)
-  if (!creds) {
-    // No credentials — try OMC cache as last resort
-    return readOmcCache(dir)
-  }
-
-  // Fetch from Anthropic API
-  const usage = await fetchUsage(creds.accessToken)
-
-  // Cache successful results
-  if (!usage.error) {
-    cache.set(profileId, { data: usage, fetchedAt: Date.now() })
-    return usage
-  }
-
-  // API failed — try stale in-memory cache
-  if (cached && Date.now() - cached.fetchedAt < STALE_MS) {
-    return cached.data
-  }
-
-  // Last resort — read OMC cache file
-  const omcData = readOmcCache(dir)
+async function pollProfile(profileId: string, configDir: string): Promise<void> {
+  // Priority 1: OMC cache (free, no API call)
+  const omcData = readOmcCache(configDir)
   if (omcData) {
-    cache.set(profileId, { data: omcData, fetchedAt: omcData.fetchedAt })
-    return omcData
+    cache.set(profileId, omcData)
+    return
   }
 
-  return usage
+  // Priority 2: Anthropic API (only when OMC cache unavailable/stale)
+  const creds = readCredentials(configDir)
+  if (!creds) return
+
+  const apiData = await fetchUsageFromApi(creds.accessToken)
+  if (apiData) {
+    cache.set(profileId, apiData)
+    console.error(`[POOL] Fetched real usage for "${profileId}": 5h=${apiData.fiveHourPercent}% 7d=${apiData.weeklyPercent}%`)
+  }
+  // If API failed, keep existing cache (don't overwrite with nothing)
+}
+
+async function pollAllProfiles(): Promise<void> {
+  for (const p of registeredProfiles) {
+    await pollProfile(p.id, p.configDir)  // sequential to avoid burst
+  }
+}
+
+// ── Public API ───────────────────────────────────────────────────────
+
+/**
+ * Register profiles and start background polling.
+ * Called once at server startup.
+ */
+export function startUsagePoller(profiles: Array<{ id: string; configDir?: string }>): void {
+  registeredProfiles = profiles.map(p => ({
+    id: p.id,
+    configDir: p.configDir || join(homedir(), ".claude"),
+  }))
+
+  // Initial poll immediately
+  pollAllProfiles().catch(() => {})
+
+  // Then every 5 minutes
+  if (pollerInterval) clearInterval(pollerInterval)
+  pollerInterval = setInterval(() => {
+    pollAllProfiles().catch(() => {})
+  }, POLL_INTERVAL_MS)
 }
 
 /**
- * Get real usage for all profiles at once.
- * Returns map of profileId → RealUsage.
+ * Get cached real usage for a profile.
+ * NEVER calls API — returns whatever is in cache (may be null).
  */
-export async function getAllProfileUsage(
-  profiles: Array<{ id: string; configDir?: string }>
-): Promise<Map<string, RealUsage>> {
-  const results = new Map<string, RealUsage>()
-  await Promise.all(profiles.map(async (p) => {
-    const usage = await getRealUsage(p.id, p.configDir)
-    if (usage) results.set(p.id, usage)
-  }))
-  return results
+export function getCachedUsage(profileId: string): RealUsage | null {
+  return cache.get(profileId) ?? null
+}
+
+/**
+ * Get cached real usage for all registered profiles.
+ */
+export function getAllCachedUsage(): Map<string, RealUsage> {
+  return new Map(cache)
+}
+
+/** Stop the background poller — for testing */
+export function stopUsagePoller(): void {
+  if (pollerInterval) {
+    clearInterval(pollerInterval)
+    pollerInterval = null
+  }
+  cache.clear()
+  registeredProfiles = []
 }
