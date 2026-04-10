@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.35.0](https://github.com/rynfar/meridian/compare/meridian-v1.34.1...meridian-v1.35.0) (2026-04-10)
+
+
+### Features
+
+* add version field to /health endpoint response ([#331](https://github.com/rynfar/meridian/issues/331)) ([382aee0](https://github.com/rynfar/meridian/commit/382aee0bd481bd0e56c781bf8d00be00368e980e))
+
 ## [1.34.1](https://github.com/rynfar/meridian/compare/meridian-v1.34.0...meridian-v1.34.1) (2026-04-09)
 
 
