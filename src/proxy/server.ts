@@ -27,6 +27,7 @@ import { detectAdapter } from "./adapters/detect"
 import { buildQueryOptions, type QueryContext } from "./query"
 import { resolveProfile, listProfiles, setActiveProfile, getActiveProfileId, getEffectiveProfiles, restoreActiveProfile } from "./profiles"
 import { selectProfile, recordSuccess, recordRateLimit, getPoolStatus, getSessionProfile, bindSessionProfile, buildRateLimitHeaders } from "./pool"
+import { getAllProfileUsage } from "./usageApi"
 import { filterBetasForProfile, getBetaPolicyFromEnv } from "./betas"
 import { createFileChangeHook, extractFileChangesFromMessages, formatFileChangeSummary, type FileChange } from "./fileChanges"
 import { detectTokenAnomalies, formatAnomalyAlerts, type TokenSnapshot } from "./tokenHealth"
@@ -1849,7 +1850,25 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
   })
 
   app.get("/pool/status", async (c) => {
-    return c.json({ profiles: getPoolStatus() })
+    // Merge pool health data with real Anthropic usage data
+    const poolProfiles = getPoolStatus()
+    const effective = getEffectiveProfiles(finalConfig.profiles)
+    const profileConfigs = effective.map(p => ({ id: p.id, configDir: p.claudeConfigDir }))
+    const realUsage = await getAllProfileUsage(profileConfigs)
+    const merged = poolProfiles.map(p => {
+      const real = realUsage.get(p.profileId)
+      return {
+        ...p,
+        realUsage: real ? {
+          fiveHourPct: real.fiveHourPercent,
+          sevenDayPct: real.weeklyPercent,
+          fiveHourResetsAt: real.fiveHourResetsAt,
+          weeklyResetsAt: real.weeklyResetsAt,
+          fetchedAt: real.fetchedAt,
+        } : null,
+      }
+    })
+    return c.json({ profiles: merged })
   })
 
   app.post("/auth/refresh", async (c) => {
