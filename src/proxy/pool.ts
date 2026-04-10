@@ -206,6 +206,37 @@ export function getUsagePercent(profileId: string): { fiveHour: number; sevenDay
   }
 }
 
+/**
+ * Build rate limit headers for a profile's response.
+ * Matches Anthropic's header format so Claude Code statusline can parse them.
+ */
+export function buildRateLimitHeaders(profileId: string): Record<string, string> {
+  const limit5h = parseInt(process.env.MERIDIAN_LIMIT_5H || "0", 10) || 5_000_000
+  const limit7d = parseInt(process.env.MERIDIAN_LIMIT_7D || "0", 10) || 45_000_000
+  const used5h = getUsageInWindow(profileId, FIVE_HOUR_MS)
+  const used7d = getUsageInWindow(profileId, SEVEN_DAY_MS)
+  const remaining5h = Math.max(0, limit5h - used5h)
+  const remaining7d = Math.max(0, limit7d - used7d)
+
+  // Reset timestamps: when the current window expires
+  const now = Date.now()
+  const reset5h = new Date(now + FIVE_HOUR_MS).toISOString()
+  const reset7d = new Date(now + SEVEN_DAY_MS).toISOString()
+
+  return {
+    "x-ratelimit-limit-requests": String(limit5h),
+    "x-ratelimit-limit-tokens": String(limit5h),
+    "x-ratelimit-remaining-requests": String(remaining5h),
+    "x-ratelimit-remaining-tokens": String(remaining5h),
+    "x-ratelimit-reset-requests": reset5h,
+    "x-ratelimit-reset-tokens": reset5h,
+    // Custom headers for 7d window (not standard Anthropic but useful)
+    "x-ratelimit-limit-tokens-weekly": String(limit7d),
+    "x-ratelimit-remaining-tokens-weekly": String(remaining7d),
+    "x-ratelimit-reset-tokens-weekly": reset7d,
+  }
+}
+
 /** Get health status for all known profiles (for telemetry/debugging) */
 export function getPoolStatus(): Array<ProfileHealth & { available: boolean; usage: { fiveHourPct: number; sevenDayPct: number; tokens5h: number; tokens7d: number } }> {
   tickRecovery()

@@ -26,7 +26,7 @@ import { getLastUserMessage } from "./messages"
 import { detectAdapter } from "./adapters/detect"
 import { buildQueryOptions, type QueryContext } from "./query"
 import { resolveProfile, listProfiles, setActiveProfile, getActiveProfileId, getEffectiveProfiles, restoreActiveProfile } from "./profiles"
-import { selectProfile, recordSuccess, recordRateLimit, getPoolStatus, getSessionProfile, bindSessionProfile } from "./pool"
+import { selectProfile, recordSuccess, recordRateLimit, getPoolStatus, getSessionProfile, bindSessionProfile, buildRateLimitHeaders } from "./pool"
 import { filterBetasForProfile, getBetaPolicyFromEnv } from "./betas"
 import { createFileChangeHook, extractFileChangesFromMessages, formatFileChangeSummary, type FileChange } from "./fileChanges"
 import { detectTokenAnomalies, formatAnomalyAlerts, type TokenSnapshot } from "./tokenHealth"
@@ -1038,6 +1038,7 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
             headers: {
               "Content-Type": "application/json",
               "X-Claude-Session-ID": responseSessionId,
+              ...buildRateLimitHeaders(profile.id),
             }
           })
         }
@@ -1672,7 +1673,8 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
             "Content-Type": "text/event-stream",
             "Cache-Control": "no-cache",
             Connection: "keep-alive",
-            "X-Claude-Session-ID": streamSessionId
+            "X-Claude-Session-ID": streamSessionId,
+            ...buildRateLimitHeaders(profile.id),
           }
         })
       } catch (error) {
