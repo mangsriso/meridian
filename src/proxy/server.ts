@@ -15,7 +15,7 @@ import { randomUUID } from "crypto"
 import { withClaudeLogContext } from "../logger"
 import { createPassthroughMcpServer, stripMcpPrefix, PASSTHROUGH_MCP_NAME, PASSTHROUGH_MCP_PREFIX } from "./passthroughTools"
 
-import { telemetryStore, diagnosticLog, createTelemetryRoutes, landingHtml } from "../telemetry"
+import { telemetryStore, diagnosticLog, createTelemetryRoutes, landingHtml, renderPrometheusMetrics } from "../telemetry"
 import type { RequestMetric } from "../telemetry"
 import { classifyError, isStaleSessionError, isRateLimitError, isExtraUsageRequiredError, isExpiredTokenError } from "./errors"
 import { refreshOAuthToken } from "./tokenRefresh"
@@ -213,7 +213,7 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
         status: "ok",
         service: "meridian",
         format: "anthropic",
-        endpoints: ["/v1/messages", "/messages", "/v1/chat/completions", "/v1/models", "/telemetry", "/health"]
+        endpoints: ["/v1/messages", "/messages", "/v1/chat/completions", "/v1/models", "/telemetry", "/metrics", "/health"]
       })
     }
     return c.html(landingHtml)
@@ -1710,6 +1710,14 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
 
   // Telemetry dashboard and API
   app.route("/telemetry", createTelemetryRoutes())
+
+  // Prometheus metrics endpoint
+  app.get("/metrics", (c) => {
+    const body = renderPrometheusMetrics(telemetryStore)
+    return c.body(body, 200, {
+      "Content-Type": "text/plain; version=0.0.4; charset=utf-8",
+    })
+  })
 
   // Health check endpoint — verifies auth status
   app.get("/health", async (c) => {
