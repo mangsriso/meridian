@@ -11,7 +11,7 @@
  * Background poller runs every 5 minutes to avoid rate limiting.
  */
 
-import { readFileSync, existsSync } from "node:fs"
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs"
 import { join } from "node:path"
 import { homedir } from "node:os"
 import https from "node:https"
@@ -123,26 +123,62 @@ function fetchUsageFromApi(accessToken: string): Promise<RealUsage | null> {
   })
 }
 
+// ── Meridian Disk Cache ──────────────────────────────────────────────
+// Persists API results to disk so data survives restarts.
+// Especially important for profiles without OMC (e.g. work profile).
+
+const MERIDIAN_CACHE_DIR = join(homedir(), ".config", "meridian", "usage-cache")
+
+function writeMeridianCache(profileId: string, data: RealUsage): void {
+  try {
+    mkdirSync(MERIDIAN_CACHE_DIR, { recursive: true })
+    writeFileSync(
+      join(MERIDIAN_CACHE_DIR, `${profileId}.json`),
+      JSON.stringify(data, null, 2)
+    )
+  } catch { /* best effort */ }
+}
+
+function readMeridianCache(profileId: string): RealUsage | null {
+  const cachePath = join(MERIDIAN_CACHE_DIR, `${profileId}.json`)
+  if (!existsSync(cachePath)) return null
+  try {
+    const data = JSON.parse(readFileSync(cachePath, "utf-8")) as RealUsage
+    if (Date.now() - data.fetchedAt > OMC_CACHE_MAX_AGE_MS) return null
+    return data
+  } catch {
+    return null
+  }
+}
+
 // ── Background Poller ────────────────────────────────────────────────
 
 async function pollProfile(profileId: string, configDir: string): Promise<void> {
-  // Priority 1: OMC cache (free, no API call)
+  // Priority 1: OMC cache (free, no API call — maintained by OMC plugin)
   const omcData = readOmcCache(configDir)
   if (omcData) {
     cache.set(profileId, omcData)
     return
   }
 
-  // Priority 2: Anthropic API (only when OMC cache unavailable/stale)
+  // Priority 2: Meridian's own disk cache (survives restarts)
+  const diskData = readMeridianCache(profileId)
+  if (diskData) {
+    cache.set(profileId, diskData)
+    // Don't return — still try API to get fresher data
+  }
+
+  // Priority 3: Anthropic API (only when no fresh cache available)
   const creds = readCredentials(configDir)
   if (!creds) return
 
   const apiData = await fetchUsageFromApi(creds.accessToken)
   if (apiData) {
     cache.set(profileId, apiData)
+    writeMeridianCache(profileId, apiData)  // persist to disk
     console.error(`[POOL] Fetched real usage for "${profileId}": 5h=${apiData.fiveHourPercent}% 7d=${apiData.weeklyPercent}%`)
   }
-  // If API failed, keep existing cache (don't overwrite with nothing)
+  // If API failed, keep existing in-memory cache (from disk or prior API success)
 }
 
 async function pollAllProfiles(): Promise<void> {
