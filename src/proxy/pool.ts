@@ -87,10 +87,14 @@ export function selectProfile(profileIds: string[]): string {
     // Skip profiles below minimum viable score
     if (h.score < MIN_VIABLE_SCORE) continue
 
-    // Score = health + LRU bonus (older = better) + jitter
+    // Score = health + usage headroom bonus + LRU bonus + jitter
+    // Usage headroom: profile with lower usage% gets higher bonus (0-30 range)
+    const usage = getUsagePercent(id)
+    const maxUsage = Math.max(usage.fiveHour, usage.sevenDay)
+    const usageBonus = (100 - maxUsage) * 0.3  // 0-30 points based on remaining capacity
     const lruBonus = (now - h.lastUsed) / 60000  // +1 per minute since last use
     const jitter = Math.random() * 3
-    const effectiveScore = h.score + lruBonus + jitter
+    const effectiveScore = h.score + usageBonus + lruBonus + jitter
 
     if (effectiveScore > bestScore) {
       bestScore = effectiveScore
@@ -117,10 +121,13 @@ export function selectProfile(profileIds: string[]): string {
   return best.profileId
 }
 
-/** Record a successful request for a profile */
-export function recordSuccess(profileId: string): void {
+/** Record a successful request for a profile, with optional token usage */
+export function recordSuccess(profileId: string, tokens?: { input: number; output: number }): void {
   const h = getOrCreate(profileId)
   h.score = Math.min(MAX_SCORE, h.score + SUCCESS_BONUS)
+  if (tokens) {
+    recordTokenUsage(profileId, tokens.input + tokens.output)
+  }
 }
 
 /** Record a rate limit hit — drops score and sets cooldown */
@@ -137,14 +144,85 @@ export function recordFailure(profileId: string): void {
   h.score = Math.max(0, h.score + FAILURE_PENALTY)
 }
 
+// ── Usage Tracking (5h / 7d sliding windows) ────────────────────────
+// Track token consumption per profile to enable usage-aware load balancing.
+// New conversations route to the profile with lowest usage percentage.
+
+interface UsageEntry {
+  timestamp: number
+  tokens: number
+}
+
+const FIVE_HOUR_MS = 5 * 60 * 60 * 1000
+const SEVEN_DAY_MS = 7 * 24 * 60 * 60 * 1000
+
+const usageLog = new Map<string, UsageEntry[]>()
+
+/** Prune entries outside the 7-day window */
+function pruneUsageLog(profileId: string): void {
+  const entries = usageLog.get(profileId)
+  if (!entries) return
+  const cutoff = Date.now() - SEVEN_DAY_MS
+  const pruned = entries.filter(e => e.timestamp > cutoff)
+  if (pruned.length === 0) usageLog.delete(profileId)
+  else usageLog.set(profileId, pruned)
+}
+
+/** Record token usage for a profile */
+export function recordTokenUsage(profileId: string, tokens: number): void {
+  if (tokens <= 0) return
+  let entries = usageLog.get(profileId)
+  if (!entries) {
+    entries = []
+    usageLog.set(profileId, entries)
+  }
+  entries.push({ timestamp: Date.now(), tokens })
+  // Lazy prune: every 100 entries
+  if (entries.length % 100 === 0) pruneUsageLog(profileId)
+}
+
+/** Get token usage within a time window */
+function getUsageInWindow(profileId: string, windowMs: number): number {
+  const entries = usageLog.get(profileId)
+  if (!entries) return 0
+  const cutoff = Date.now() - windowMs
+  return entries.reduce((sum, e) => e.timestamp > cutoff ? sum + e.tokens : sum, 0)
+}
+
+/** Get usage percentages for a profile (estimated against configurable limits) */
+export function getUsagePercent(profileId: string): { fiveHour: number; sevenDay: number } {
+  // Estimated limits per Max subscription (tokens per window)
+  // These are approximate — Anthropic doesn't publish exact numbers.
+  // Adjust via MERIDIAN_LIMIT_5H and MERIDIAN_LIMIT_7D env vars.
+  const limit5h = parseInt(process.env.MERIDIAN_LIMIT_5H || "0", 10) || 5_000_000
+  const limit7d = parseInt(process.env.MERIDIAN_LIMIT_7D || "0", 10) || 45_000_000
+
+  const used5h = getUsageInWindow(profileId, FIVE_HOUR_MS)
+  const used7d = getUsageInWindow(profileId, SEVEN_DAY_MS)
+
+  return {
+    fiveHour: Math.min(100, Math.round((used5h / limit5h) * 100)),
+    sevenDay: Math.min(100, Math.round((used7d / limit7d) * 100)),
+  }
+}
+
 /** Get health status for all known profiles (for telemetry/debugging) */
-export function getPoolStatus(): Array<ProfileHealth & { available: boolean }> {
+export function getPoolStatus(): Array<ProfileHealth & { available: boolean; usage: { fiveHourPct: number; sevenDayPct: number; tokens5h: number; tokens7d: number } }> {
   tickRecovery()
   const now = Date.now()
-  return Array.from(healthMap.values()).map(h => ({
-    ...h,
-    available: h.score >= MIN_VIABLE_SCORE && h.cooldownUntil <= now,
-  }))
+  return Array.from(healthMap.values()).map(h => {
+    const pct = getUsagePercent(h.profileId)
+    return {
+      ...h,
+      available: h.score >= MIN_VIABLE_SCORE && h.cooldownUntil <= now,
+      usage: {
+        fiveHourPct: pct.fiveHour,
+        sevenDayPct: pct.sevenDay,
+        tokens5h: getUsageInWindow(h.profileId, FIVE_HOUR_MS),
+        tokens7d: getUsageInWindow(h.profileId, SEVEN_DAY_MS),
+      },
+    }
+  })
 }
 
 // ── Session Stickiness ──────────────────────────────────────────────
@@ -209,4 +287,5 @@ export function resetPool(): void {
   healthMap.clear()
   sessionProfileMap.clear()
   sessionExpiryMap.clear()
+  usageLog.clear()
 }

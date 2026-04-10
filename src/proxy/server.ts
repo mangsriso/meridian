@@ -980,8 +980,11 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
             isResume,
             passthrough
           )
-          // Record pool success for profile rotation health tracking
-          recordSuccess(profile.id)
+          // Record pool success + token usage for profile rotation
+          recordSuccess(profile.id, lastUsage ? {
+            input: (lastUsage.input_tokens ?? 0) + (lastUsage.cache_creation_input_tokens ?? 0),
+            output: lastUsage.output_tokens ?? 0,
+          } : undefined)
 
           telemetryStore.record({
             requestId: requestMeta.requestId,
@@ -1558,8 +1561,11 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
                   isResume,
                   passthrough
                 )
-                // Record pool success for profile rotation health tracking
-                recordSuccess(profile.id)
+                // Record pool success + token usage for profile rotation
+                recordSuccess(profile.id, lastUsage ? {
+                  input: (lastUsage.input_tokens ?? 0) + (lastUsage.cache_creation_input_tokens ?? 0),
+                  output: lastUsage.output_tokens ?? 0,
+                } : undefined)
 
                 telemetryStore.record({
                   requestId: requestMeta.requestId,
