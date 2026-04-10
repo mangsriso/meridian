@@ -26,6 +26,7 @@ import { getLastUserMessage } from "./messages"
 import { detectAdapter } from "./adapters/detect"
 import { buildQueryOptions, type QueryContext } from "./query"
 import { resolveProfile, listProfiles, setActiveProfile, getActiveProfileId, getEffectiveProfiles, restoreActiveProfile } from "./profiles"
+import { selectProfile, recordSuccess, recordRateLimit, getPoolStatus, getSessionProfile, bindSessionProfile } from "./pool"
 import { filterBetasForProfile, getBetaPolicyFromEnv } from "./betas"
 import { createFileChangeHook, extractFileChangesFromMessages, formatFileChangeSummary, type FileChange } from "./fileChanges"
 import { detectTokenAnomalies, formatAnomalyAlerts, type TokenSnapshot } from "./tokenHealth"
@@ -265,12 +266,25 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
           )
         }
 
-        // Resolve profile: header > active > default > first configured
+        // Resolve profile: header > session sticky > pool auto-select > active > default
+        const explicitProfile = c.req.header("x-meridian-profile") || undefined
+        const effectiveProfiles = getEffectiveProfiles(finalConfig.profiles)
+        // Check session stickiness BEFORE pool selection — existing conversations
+        // must stay on the same profile to preserve session resume + prompt cache.
+        const earlySessionId = adapter.getSessionId(c)
+        const stickyProfileId = !explicitProfile ? getSessionProfile(earlySessionId) : undefined
+        const poolSelectedId = !explicitProfile && !stickyProfileId && effectiveProfiles.length > 1
+          ? selectProfile(effectiveProfiles.map(p => p.id))
+          : undefined
         const profile = resolveProfile(
           finalConfig.profiles,
           finalConfig.defaultProfile,
-          c.req.header("x-meridian-profile") || undefined
+          explicitProfile || stickyProfileId || poolSelectedId
         )
+        // Bind session to selected profile for future stickiness
+        if (earlySessionId && !stickyProfileId) {
+          bindSessionProfile(earlySessionId, profile.id)
+        }
 
         const authStatus = await getClaudeAuthStatusAsync(
           profile.id !== "default" ? profile.id : undefined,
@@ -362,7 +376,7 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
         const betas = betaFilter.forwarded
 
         // Session resume: look up cached Claude SDK session and classify mutation
-        const agentSessionId = adapter.getSessionId(c)
+        const agentSessionId = earlySessionId  // reuse from pool stickiness check above
         // Scope session keys by profile to isolate resume state across accounts.
         // For agents with session IDs (OpenCode): prefix the key.
         // For agents without (Pi): pass profile-scoped workingDirectory to fingerprint lookup.
@@ -760,7 +774,9 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
                   }
 
                   // Rate-limit retry: first strip [1m] (free, different tier), then backoff
+                  // Also record rate limit in pool for profile rotation
                   if (isRateLimitError(errMsg)) {
+                    recordRateLimit(profile.id)
                     if (hasExtendedContext(model)) {
                       const from = model
                       model = stripExtendedContext(model)
@@ -964,6 +980,9 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
             isResume,
             passthrough
           )
+          // Record pool success for profile rotation health tracking
+          recordSuccess(profile.id)
+
           telemetryStore.record({
             requestId: requestMeta.requestId,
             timestamp: Date.now(),
@@ -1151,7 +1170,9 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
                     }
 
                     // Rate-limit retry: first strip [1m] (free, different tier), then backoff
+                    // Also record rate limit in pool for profile rotation
                     if (isRateLimitError(errMsg)) {
+                      recordRateLimit(profile.id)
                       if (hasExtendedContext(model)) {
                         const from = model
                         model = stripExtendedContext(model)
@@ -1537,6 +1558,9 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
                   isResume,
                   passthrough
                 )
+                // Record pool success for profile rotation health tracking
+                recordSuccess(profile.id)
+
                 telemetryStore.record({
                   requestId: requestMeta.requestId,
                   timestamp: Date.now(),
@@ -1814,6 +1838,10 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
     clearSessionCache()
     console.error(`[PROXY] Active profile switched to: ${body.profile} (session cache cleared)`)
     return c.json({ success: true, activeProfile: body.profile })
+  })
+
+  app.get("/pool/status", async (c) => {
+    return c.json({ profiles: getPoolStatus() })
   })
 
   app.post("/auth/refresh", async (c) => {
