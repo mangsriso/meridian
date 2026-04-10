@@ -26,7 +26,7 @@ import { getLastUserMessage } from "./messages"
 import { detectAdapter } from "./adapters/detect"
 import { buildQueryOptions, type QueryContext } from "./query"
 import { resolveProfile, listProfiles, setActiveProfile, getActiveProfileId, getEffectiveProfiles, restoreActiveProfile } from "./profiles"
-import { selectProfile, recordSuccess, recordRateLimit, getPoolStatus, getSessionProfile, bindSessionProfile, buildRateLimitHeaders } from "./pool"
+import { selectProfile, recordSuccess, recordRateLimit, getPoolStatus, getSessionProfile, bindSessionProfile, buildRateLimitHeaders, setRealUsageLookup } from "./pool"
 import { startUsagePoller, getCachedUsage } from "./usageApi"
 import { filterBetasForProfile, getBetaPolicyFromEnv } from "./betas"
 import { createFileChangeHook, extractFileChangesFromMessages, formatFileChangeSummary, type FileChange } from "./fileChanges"
@@ -199,6 +199,9 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
 
   // Restore persisted active profile from last session
   restoreActiveProfile(finalConfig.profiles)
+
+  // Wire real Anthropic usage data into pool selection algorithm
+  setRealUsageLookup((profileId) => getCachedUsage(profileId))
 
   // Start background usage poller after a delay — profiles may not be
   // loaded from disk yet at startup (5s TTL disk cache).

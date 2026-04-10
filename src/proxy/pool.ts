@@ -63,6 +63,17 @@ function tickRecovery(): void {
   }
 }
 
+// ── Real Usage Integration ───────────────────────────────────────────
+// pool.ts is a leaf module — it can't import usageApi.ts directly.
+// Instead, server.ts injects a lookup function at startup.
+type RealUsageLookup = (profileId: string) => { fiveHourPercent: number; weeklyPercent: number } | null
+let getCachedUsageFn: RealUsageLookup | null = null
+
+/** Inject the real usage lookup function. Called once by server.ts at startup. */
+export function setRealUsageLookup(fn: RealUsageLookup): void {
+  getCachedUsageFn = fn
+}
+
 /**
  * Select the best profile from a list of profile IDs.
  * Returns the profileId with highest score that isn't in cooldown.
@@ -89,8 +100,12 @@ export function selectProfile(profileIds: string[]): string {
 
     // Score = health + usage headroom bonus + LRU bonus + jitter
     // Usage headroom: profile with lower usage% gets higher bonus (0-30 range)
-    const usage = getUsagePercent(id)
-    const maxUsage = Math.max(usage.fiveHour, usage.sevenDay)
+    // Prefer REAL Anthropic data (from usageApi poller) over self-tracked estimates
+    const realData = getCachedUsageFn?.(id)
+    const realValid = realData && realData.fiveHourPercent >= 0
+    const usage5h = realValid ? realData!.fiveHourPercent : getUsagePercent(id).fiveHour
+    const usage7d = realValid ? realData!.weeklyPercent : getUsagePercent(id).sevenDay
+    const maxUsage = Math.max(usage5h, usage7d)
     const usageBonus = (100 - maxUsage) * 0.3  // 0-30 points based on remaining capacity
     const lruBonus = (now - h.lastUsed) / 60000  // +1 per minute since last use
     const jitter = Math.random() * 3
