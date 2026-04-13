@@ -202,6 +202,10 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
   // Track cumulative discovered tools per SDK session (survives across requests)
   const sessionDiscoveredTools = new Map<string, Set<string>>()
 
+  // Cache last-seen tool definitions per agent session to prevent prompt cache
+  // invalidation when clients intermittently omit tools on continuation requests.
+  const sessionToolCache = new Map<string, any[]>()
+
   const app = new Hono()
 
   app.use("*", cors())
@@ -607,16 +611,27 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
 
       // In passthrough mode, register OpenCode's tools as MCP tools so Claude
       // can actually call them (not just see them as text descriptions).
+      // Tool cache: if the client omits tools on a continuation request but
+      // previously sent them, reuse the cached set to preserve prompt cache.
       let passthroughMcp: ReturnType<typeof createPassthroughMcpServer> | undefined
-      if (passthrough && Array.isArray(body.tools) && body.tools.length > 0) {
-        passthroughMcp = createPassthroughMcpServer(body.tools, adapter.getCoreToolNames?.())
+      let requestTools = Array.isArray(body.tools) ? body.tools : []
+      if (passthrough && requestTools.length === 0 && profileSessionId) {
+        const cached = sessionToolCache.get(profileSessionId)
+        if (cached && cached.length > 0) {
+          requestTools = cached
+          console.error(`[PROXY] ${requestMeta.requestId} tools_restored: client sent 0 tools but session had ${cached.length} — reusing cached tools to preserve prompt cache`)
+        }
+      }
+      if (passthrough && requestTools.length > 0) {
+        passthroughMcp = createPassthroughMcpServer(requestTools, adapter.getCoreToolNames?.())
+        if (profileSessionId) sessionToolCache.set(profileSessionId, requestTools)
       }
       const hasDeferredTools = passthroughMcp?.hasDeferredTools ?? false
       // Count deferred tools: when auto-defer is active, non-core tools are deferred
       const coreNames = adapter.getCoreToolNames?.()
       const coreSet = coreNames ? new Set(coreNames.map(n => n.toLowerCase())) : undefined
-      const deferredToolCount = hasDeferredTools && Array.isArray(body.tools)
-        ? body.tools.filter((t: any) => t.defer_loading === true || (coreSet && !coreSet.has(String(t.name).toLowerCase()))).length
+      const deferredToolCount = hasDeferredTools && requestTools.length > 0
+        ? requestTools.filter((t: any) => t.defer_loading === true || (coreSet && !coreSet.has(String(t.name).toLowerCase()))).length
         : 0
       if (hasDeferredTools) {
         console.error(`[PROXY] ${requestMeta.requestId} deferred=${deferredToolCount}/${toolCount} tools (core: ${coreNames?.join(",") ?? "none"})`)
