@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach } from "bun:test"
 import { Hono } from "hono"
-import { telemetryStore, createTelemetryRoutes } from "../telemetry"
+import { telemetryStore, createTelemetryRoutes, renderPrometheusMetrics } from "../telemetry"
 import type { RequestMetric } from "../telemetry"
 
 function makeMetric(overrides: Partial<RequestMetric> = {}): RequestMetric {
@@ -36,6 +36,12 @@ describe("Telemetry routes", () => {
     telemetryStore.clear()
     app = new Hono()
     app.route("/telemetry", createTelemetryRoutes())
+    app.get("/metrics", (c) => {
+      const body = renderPrometheusMetrics(telemetryStore)
+      return c.body(body, 200, {
+        "Content-Type": "text/plain; version=0.0.4; charset=utf-8",
+      })
+    })
   })
 
   it("GET /telemetry returns HTML dashboard", async () => {
@@ -173,5 +179,25 @@ describe("Telemetry routes", () => {
     expect(body.tokenUsage.totalCacheCreationTokens).toBe(1650)
     expect(body.tokenUsage.cacheMissOnResumeCount).toBe(1)
     expect(body.tokenUsage.avgCacheHitRate).toBeCloseTo(0.53, 1)
+  })
+
+  it("GET /metrics returns Prometheus format with correct content type", async () => {
+    telemetryStore.record(makeMetric())
+
+    const res = await app.fetch(new Request("http://localhost/metrics"))
+    expect(res.status).toBe(200)
+    expect(res.headers.get("content-type")).toContain("text/plain")
+    const body = await res.text()
+    expect(body).toContain("# TYPE meridian_requests_total counter")
+    expect(body).toContain("# TYPE meridian_request_duration_ms histogram")
+  })
+
+  it("GET /metrics returns 200 with valid output when store is empty", async () => {
+    const res = await app.fetch(new Request("http://localhost/metrics"))
+    expect(res.status).toBe(200)
+    const body = await res.text()
+    expect(body).toContain("# HELP meridian_requests_total")
+    expect(body).not.toContain("NaN")
+    expect(body).not.toContain("undefined")
   })
 })

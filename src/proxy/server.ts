@@ -15,7 +15,7 @@ import { randomUUID } from "crypto"
 import { withClaudeLogContext } from "../logger"
 import { createPassthroughMcpServer, stripMcpPrefix, PASSTHROUGH_MCP_NAME, PASSTHROUGH_MCP_PREFIX } from "./passthroughTools"
 
-import { telemetryStore, diagnosticLog, createTelemetryRoutes, landingHtml } from "../telemetry"
+import { telemetryStore, diagnosticLog, createTelemetryRoutes, landingHtml, renderPrometheusMetrics } from "../telemetry"
 import type { RequestMetric } from "../telemetry"
 import { classifyError, isStaleSessionError, isRateLimitError, isExtraUsageRequiredError, isExpiredTokenError } from "./errors"
 import { refreshOAuthToken } from "./tokenRefresh"
@@ -23,6 +23,7 @@ import { checkPluginConfigured } from "./setup"
 import { mapModelToClaudeModel, resolveClaudeExecutableAsync, isClosedControllerError, getClaudeAuthStatusAsync, getAuthCacheInfo, hasExtendedContext, stripExtendedContext, recordExtendedContextUnavailable } from "./models"
 import { translateOpenAiToAnthropic, translateAnthropicToOpenAi, translateAnthropicSseEvent, buildModelList } from "./openai"
 import { getLastUserMessage } from "./messages"
+import { requireAuth, authEnabled } from "./auth"
 import { detectAdapter } from "./adapters/detect"
 import { buildQueryOptions, type QueryContext } from "./query"
 import { resolveProfile, listProfiles, setActiveProfile, getActiveProfileId, getEffectiveProfiles, restoreActiveProfile } from "./profiles"
@@ -216,9 +217,24 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
   // Track cumulative discovered tools per SDK session (survives across requests)
   const sessionDiscoveredTools = new Map<string, Set<string>>()
 
+  // Cache last-seen tool definitions per agent session to prevent prompt cache
+  // invalidation when clients intermittently omit tools on continuation requests.
+  const sessionToolCache = new Map<string, any[]>()
+
   const app = new Hono()
 
   app.use("*", cors())
+
+  // Optional API key auth — protects all routes except / and /health
+  // when MERIDIAN_API_KEY is set. No-op when unset.
+  app.use("/v1/*", requireAuth)
+  app.use("/messages", requireAuth)
+  app.use("/telemetry/*", requireAuth)
+  app.use("/telemetry", requireAuth)
+  app.use("/metrics", requireAuth)
+  app.use("/profiles/*", requireAuth)
+  app.use("/profiles", requireAuth)
+  app.use("/auth/*", requireAuth)
 
   app.get("/", (c) => {
     // API clients get JSON, browsers get the landing page
@@ -228,7 +244,7 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
         status: "ok",
         service: "meridian",
         format: "anthropic",
-        endpoints: ["/v1/messages", "/messages", "/v1/chat/completions", "/v1/models", "/telemetry", "/health"]
+        endpoints: ["/v1/messages", "/messages", "/v1/chat/completions", "/v1/models", "/telemetry", "/metrics", "/health"]
       })
     }
     return c.html(landingHtml)
@@ -371,6 +387,16 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
           } catch (e) {
             console.error(`[PROXY] ${requestMeta.requestId} ignoring malformed x-opencode-thinking header: ${e instanceof Error ? e.message : String(e)}`)
           }
+        }
+        // SDK feature toggles — resolved once per request for use in thinking
+        // defaults, settingSources, and buildQueryOptions below.
+        const { getFeaturesForAdapter } = require("./sdkFeatures") as typeof import("./sdkFeatures")
+        const sdkFeatures = getFeaturesForAdapter(adapter.name)
+
+        // Default thinking from SDK features config when client didn't set it
+        if (!thinking) {
+          if (sdkFeatures.thinking === "adaptive") thinking = { type: "adaptive" }
+          else if (sdkFeatures.thinking === "enabled") thinking = { type: "enabled" }
         }
         // When the thinking beta is stripped (e.g. strip-all policy), disable thinking
         // at the SDK level to prevent thinking blocks from being generated in the
@@ -600,21 +626,40 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
       const passthrough = adapterPassthrough !== undefined
         ? adapterPassthrough
         : envBool("PASSTHROUGH")
+      // SDK setting sources — controls CLAUDE.md and user settings loading.
+      const settingSources: import("@anthropic-ai/claude-agent-sdk").SettingSource[] =
+        envBool("LOAD_CONTEXT") || sdkFeatures.claudeMd === "full"
+          ? ["user", "project"]
+          : sdkFeatures.claudeMd === "project"
+            ? ["project"]
+            : adapter.getSettingSources?.() ?? []
+
       const capturedToolUses: Array<{ id: string; name: string; input: any }> = []
       const fileChanges: FileChange[] = []
 
       // In passthrough mode, register OpenCode's tools as MCP tools so Claude
       // can actually call them (not just see them as text descriptions).
+      // Tool cache: if the client omits tools on a continuation request but
+      // previously sent them, reuse the cached set to preserve prompt cache.
       let passthroughMcp: ReturnType<typeof createPassthroughMcpServer> | undefined
-      if (passthrough && Array.isArray(body.tools) && body.tools.length > 0) {
-        passthroughMcp = createPassthroughMcpServer(body.tools, adapter.getCoreToolNames?.())
+      let requestTools = Array.isArray(body.tools) ? body.tools : []
+      if (passthrough && requestTools.length === 0 && profileSessionId) {
+        const cached = sessionToolCache.get(profileSessionId)
+        if (cached && cached.length > 0) {
+          requestTools = cached
+          console.error(`[PROXY] ${requestMeta.requestId} tools_restored: client sent 0 tools but session had ${cached.length} — reusing cached tools to preserve prompt cache`)
+        }
+      }
+      if (passthrough && requestTools.length > 0) {
+        passthroughMcp = createPassthroughMcpServer(requestTools, adapter.getCoreToolNames?.())
+        if (profileSessionId) sessionToolCache.set(profileSessionId, requestTools)
       }
       const hasDeferredTools = passthroughMcp?.hasDeferredTools ?? false
       // Count deferred tools: when auto-defer is active, non-core tools are deferred
       const coreNames = adapter.getCoreToolNames?.()
       const coreSet = coreNames ? new Set(coreNames.map(n => n.toLowerCase())) : undefined
-      const deferredToolCount = hasDeferredTools && Array.isArray(body.tools)
-        ? body.tools.filter((t: any) => t.defer_loading === true || (coreSet && !coreSet.has(String(t.name).toLowerCase()))).length
+      const deferredToolCount = hasDeferredTools && requestTools.length > 0
+        ? requestTools.filter((t: any) => t.defer_loading === true || (coreSet && !coreSet.has(String(t.name).toLowerCase()))).length
         : 0
       if (hasDeferredTools) {
         console.error(`[PROXY] ${requestMeta.requestId} deferred=${deferredToolCount}/${toolCount} tools (core: ${coreNames?.join(",") ?? "none"})`)
@@ -718,7 +763,14 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
                     prompt: makePrompt(), model, workingDirectory, systemContext, claudeExecutable,
                     passthrough, stream: false, sdkAgents, passthroughMcp, cleanEnv: profileEnv, hasDeferredTools,
                     resumeSessionId, isUndo, undoRollbackUuid, sdkHooks, adapter, onStderr,
-                    effort, thinking, taskBudget, betas,
+                    effort, thinking, taskBudget, betas, settingSources,
+                    codeSystemPrompt: sdkFeatures.codeSystemPrompt ? true : undefined, clientSystemPrompt: sdkFeatures.clientSystemPrompt === false ? false : undefined,
+                    memory: sdkFeatures.memory, dreaming: sdkFeatures.dreaming, sharedMemory: sdkFeatures.sharedMemory,
+                    maxBudgetUsd: sdkFeatures.maxBudgetUsd, fallbackModel: sdkFeatures.fallbackModel,
+                    sdkDebug: sdkFeatures.sdkDebug,
+                    additionalDirectories: sdkFeatures.additionalDirectories
+                      ? sdkFeatures.additionalDirectories.split(",").map(d => d.trim()).filter(Boolean)
+                      : undefined,
                   }))) {
                     // Only count real assistant content — not SDK error messages
                     // (which arrive as type:"assistant" with an error field set).
@@ -751,7 +803,14 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
                       model, workingDirectory, systemContext, claudeExecutable,
                       passthrough, stream: false, sdkAgents, passthroughMcp, cleanEnv: profileEnv, hasDeferredTools,
                       resumeSessionId: undefined, isUndo: false, undoRollbackUuid: undefined, sdkHooks, adapter, onStderr,
-                      effort, thinking, taskBudget, betas,
+                      effort, thinking, taskBudget, betas, settingSources,
+                      codeSystemPrompt: sdkFeatures.codeSystemPrompt ? true : undefined, clientSystemPrompt: sdkFeatures.clientSystemPrompt === false ? false : undefined,
+                    memory: sdkFeatures.memory, dreaming: sdkFeatures.dreaming, sharedMemory: sdkFeatures.sharedMemory,
+                      maxBudgetUsd: sdkFeatures.maxBudgetUsd, fallbackModel: sdkFeatures.fallbackModel,
+                      sdkDebug: sdkFeatures.sdkDebug,
+                      additionalDirectories: sdkFeatures.additionalDirectories
+                        ? sdkFeatures.additionalDirectories.split(",").map(d => d.trim()).filter(Boolean)
+                        : undefined,
                     }))
                     return
                   }
@@ -875,7 +934,7 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
                       continue
                     }
                     // Strip thinking blocks — meaningless to non-native clients
-                    if (passthrough && !adapter.supportsThinking?.() && (b.type === "thinking" || b.type === "redacted_thinking")) {
+                    if (passthrough && !adapter.supportsThinking?.() && !sdkFeatures.thinkingPassthrough && (b.type === "thinking" || b.type === "redacted_thinking")) {
                       claudeLog("passthrough.thinking_stripped", { mode: "non_stream", type: b.type })
                       continue
                     }
@@ -1047,7 +1106,14 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
             content: contentBlocks,
             model: body.model,
             stop_reason: stopReason,
-            usage: { input_tokens: 0, output_tokens: 0 }
+            // Forward the usage accumulated from SDK assistant messages so
+            // clients calling `messages.create()` can track cost and rate limits.
+            usage: {
+              input_tokens: lastUsage?.input_tokens ?? 0,
+              output_tokens: lastUsage?.output_tokens ?? 0,
+              cache_read_input_tokens: lastUsage?.cache_read_input_tokens,
+              cache_creation_input_tokens: lastUsage?.cache_creation_input_tokens,
+            },
           }), {
             headers: {
               "Content-Type": "application/json",
@@ -1125,7 +1191,14 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
                       prompt: makePrompt(), model, workingDirectory, systemContext, claudeExecutable,
                       passthrough, stream: true, sdkAgents, passthroughMcp, cleanEnv: profileEnv, hasDeferredTools,
                       resumeSessionId, isUndo, undoRollbackUuid, sdkHooks, adapter, onStderr,
-                      effort, thinking, taskBudget, betas,
+                      effort, thinking, taskBudget, betas, settingSources,
+                      codeSystemPrompt: sdkFeatures.codeSystemPrompt ? true : undefined, clientSystemPrompt: sdkFeatures.clientSystemPrompt === false ? false : undefined,
+                    memory: sdkFeatures.memory, dreaming: sdkFeatures.dreaming, sharedMemory: sdkFeatures.sharedMemory,
+                      maxBudgetUsd: sdkFeatures.maxBudgetUsd, fallbackModel: sdkFeatures.fallbackModel,
+                      sdkDebug: sdkFeatures.sdkDebug,
+                      additionalDirectories: sdkFeatures.additionalDirectories
+                        ? sdkFeatures.additionalDirectories.split(",").map(d => d.trim()).filter(Boolean)
+                        : undefined,
                     }))) {
                       if ((event as any).type === "stream_event") {
                         didYieldClientEvent = true
@@ -1155,7 +1228,14 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
                         model, workingDirectory, systemContext, claudeExecutable,
                         passthrough, stream: true, sdkAgents, passthroughMcp, cleanEnv: profileEnv, hasDeferredTools,
                         resumeSessionId: undefined, isUndo: false, undoRollbackUuid: undefined, sdkHooks, adapter, onStderr,
-                        effort, thinking, taskBudget, betas,
+                        effort, thinking, taskBudget, betas, settingSources,
+                        codeSystemPrompt: sdkFeatures.codeSystemPrompt ? true : undefined, clientSystemPrompt: sdkFeatures.clientSystemPrompt === false ? false : undefined,
+                    memory: sdkFeatures.memory, dreaming: sdkFeatures.dreaming, sharedMemory: sdkFeatures.sharedMemory,
+                        maxBudgetUsd: sdkFeatures.maxBudgetUsd, fallbackModel: sdkFeatures.fallbackModel,
+                        sdkDebug: sdkFeatures.sdkDebug,
+                        additionalDirectories: sdkFeatures.additionalDirectories
+                          ? sdkFeatures.additionalDirectories.split(",").map(d => d.trim()).filter(Boolean)
+                          : undefined,
                       }))
                       return
                     }
@@ -1328,7 +1408,7 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
                       // encrypted signature field.
                       if (
                         passthrough &&
-                        !adapter.supportsThinking?.() &&
+                        !adapter.supportsThinking?.() && !sdkFeatures.thinkingPassthrough &&
                         (block?.type === "thinking" || block?.type === "redacted_thinking")
                       ) {
                         if (eventIndex !== undefined) skipBlockIndices.add(eventIndex)
@@ -1756,6 +1836,43 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
 
   // Telemetry dashboard and API
   app.route("/telemetry", createTelemetryRoutes())
+
+  // SDK Features settings page and API
+  app.get("/settings", (c) => {
+    const { settingsPageHtml } = require("../telemetry/settingsPage") as typeof import("../telemetry/settingsPage")
+    return c.html(settingsPageHtml)
+  })
+  app.get("/settings/api/features", (c) => {
+    const { getAllFeatureConfigs } = require("./sdkFeatures") as typeof import("./sdkFeatures")
+    return c.json(getAllFeatureConfigs())
+  })
+  app.patch("/settings/api/features/:adapter", async (c) => {
+    const { validateFeatureUpdate, updateAdapterFeatures } = require("./sdkFeatures") as typeof import("./sdkFeatures")
+    const adapter = c.req.param("adapter")
+    const body = await c.req.json()
+    let validated: ReturnType<typeof validateFeatureUpdate>
+    try {
+      validated = validateFeatureUpdate(body)
+    } catch (e) {
+      return c.json({ error: (e as Error).message }, 400)
+    }
+    updateAdapterFeatures(adapter, validated)
+    return c.json({ ok: true })
+  })
+  app.delete("/settings/api/features/:adapter", (c) => {
+    const { resetAdapterFeatures } = require("./sdkFeatures") as typeof import("./sdkFeatures")
+    const adapter = c.req.param("adapter")
+    resetAdapterFeatures(adapter)
+    return c.json({ ok: true })
+  })
+
+  // Prometheus metrics endpoint
+  app.get("/metrics", (c) => {
+    const body = renderPrometheusMetrics(telemetryStore)
+    return c.body(body, 200, {
+      "Content-Type": "text/plain; version=0.0.4; charset=utf-8",
+    })
+  })
 
   // Health check endpoint — verifies auth status
   app.get("/health", async (c) => {

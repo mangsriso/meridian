@@ -157,6 +157,19 @@ describe("classifyError", () => {
       expect(isStaleSessionError(new Error("claude code returned an error result: No message found with message.uuid of: abc123"))).toBe(true)
     })
 
+    it("detects 'No conversation found with session ID' errors", () => {
+      expect(isStaleSessionError(new Error("No conversation found with session ID: 2e9e868c-ab59-482c-ae28-3b60ec9cb95b"))).toBe(true)
+    })
+
+    it("detects 'No conversation found to continue' errors", () => {
+      expect(isStaleSessionError(new Error("No conversation found to continue"))).toBe(true)
+    })
+
+    it("detects 'No conversations found to resume' errors", () => {
+      expect(isStaleSessionError(new Error("No conversations found to resume"))).toBe(true)
+      expect(isStaleSessionError(new Error("No conversations found to resume."))).toBe(true)
+    })
+
     it("returns false for unrelated errors", () => {
       expect(isStaleSessionError(new Error("rate limit exceeded"))).toBe(false)
       expect(isStaleSessionError(new Error("authentication failed"))).toBe(false)

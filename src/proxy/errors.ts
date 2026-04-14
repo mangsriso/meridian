@@ -142,11 +142,15 @@ export function isExpiredTokenError(errMsg: string): boolean {
 /**
  * Detect errors caused by stale session/message UUIDs.
  * These happen when the upstream Claude session no longer contains
- * the referenced message (expired, compacted server-side, etc.).
+ * the referenced message or conversation (expired, evicted server-side, etc.).
  */
 export function isStaleSessionError(error: unknown): boolean {
   if (!(error instanceof Error)) return false
-  return error.message.includes("No message found with message.uuid")
+  const msg = error.message
+  return msg.includes("No message found with message.uuid")
+    || msg.includes("No conversation found with session ID")
+    || msg.includes("No conversation found to continue")
+    || msg.includes("No conversations found to resume")
 }
 
 /**

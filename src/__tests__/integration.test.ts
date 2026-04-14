@@ -40,6 +40,7 @@ mock.module("@anthropic-ai/claude-agent-sdk", () => ({
     name: "test",
     instance: {},
   }),
+  tool: () => ({}),
 }))
 
 mock.module("../logger", () => ({
@@ -305,5 +306,95 @@ describe("Integration: Concurrent subagent requests", () => {
       expect(responses[i].status).toBe(200)
       expect(bodies[i].content[0].text).toBe("Done.")
     }
+  })
+})
+
+// ============================================================
+// NON-STREAM USAGE PROPAGATION
+// ============================================================
+
+describe("Integration: Non-stream usage propagation", () => {
+  let app: any
+
+  beforeAll(() => {
+    app = createTestApp()
+  })
+
+  beforeEach(() => {
+    mockMessages = []
+  })
+
+  it("forwards input/output tokens from the SDK assistant message", async () => {
+    mockMessages = [
+      assistantMessage([{ type: "text", text: "Done." }]),
+    ]
+
+    const response = await post(app, {
+      model: "claude-sonnet-4-5",
+      max_tokens: 1024,
+      stream: false,
+      messages: [{ role: "user", content: "ping" }],
+    })
+
+    const body = await response.json() as any
+    expect(response.status).toBe(200)
+    // `assistantMessage` helper seeds usage with input=10, output=50
+    expect(body.usage.input_tokens).toBe(10)
+    expect(body.usage.output_tokens).toBe(50)
+  })
+
+  it("forwards cache tokens when present", async () => {
+    mockMessages = [
+      {
+        type: "assistant",
+        message: {
+          id: "msg_test",
+          type: "message",
+          role: "assistant",
+          content: [{ type: "text", text: "Cached." }],
+          model: "claude-sonnet-4-5-20250929",
+          stop_reason: "end_turn",
+          usage: {
+            input_tokens: 3,
+            output_tokens: 12,
+            cache_read_input_tokens: 28933,
+            cache_creation_input_tokens: 0,
+          },
+        },
+        parent_tool_use_id: null,
+        uuid: crypto.randomUUID(),
+        session_id: "test-session",
+      } as any,
+    ]
+
+    const response = await post(app, {
+      model: "claude-sonnet-4-5",
+      max_tokens: 1024,
+      stream: false,
+      messages: [{ role: "user", content: "ping" }],
+    })
+
+    const body = await response.json() as any
+    expect(response.status).toBe(200)
+    expect(body.usage.input_tokens).toBe(3)
+    expect(body.usage.output_tokens).toBe(12)
+    expect(body.usage.cache_read_input_tokens).toBe(28933)
+    expect(body.usage.cache_creation_input_tokens).toBe(0)
+  })
+
+  it("falls back to zeros when no SDK assistant message is produced", async () => {
+    mockMessages = []
+
+    const response = await post(app, {
+      model: "claude-sonnet-4-5",
+      max_tokens: 1024,
+      stream: false,
+      messages: [{ role: "user", content: "ping" }],
+    })
+
+    const body = await response.json() as any
+    expect(response.status).toBe(200)
+    expect(body.usage.input_tokens).toBe(0)
+    expect(body.usage.output_tokens).toBe(0)
   })
 })
